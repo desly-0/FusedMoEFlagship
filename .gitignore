@@ -1,0 +1,28 @@
+# ============================================================
+# FusedMoEFlagship .gitignore
+# ============================================================
+
+# === 构建输出 ===
+build/
+*.o
+*.so
+
+# === Python 缓存 ===
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# === IDE / 编辑器 ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === 系统文件 ===
+.DS_Store
+Thumbs.db
+
+# === CANN / 昇腾相关 ===
+*.om
+*.mindir
