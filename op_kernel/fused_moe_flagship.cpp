@@ -278,6 +278,14 @@ extern "C" __global__ __aicore__ void fused_moe_flagship(
     // 使用默认 Kernel 类型（自动检测），AIC 和 AIV 核均可执行全部计算
     // 避免 MIX 模式需 ASCEND_IS_AIC/AIV 隔离 + ASCENDC_CUBE_ONLY (CV 融合 §3.3.5.1)
 
+    // 设置系统 workspace (PDF §4.4.2.1.2 + §3.3.5.1)
+    // RTC 直调工程非工程化算子、无 HAVE_WORKSPACE 编译宏，必须手动调用
+    // Matmul 高阶 API (REGIST_MATMUL_OBJ) 需要系统 workspace
+    SetSysWorkspace(workspace);
+    if (GetSysWorkSpacePtr() == nullptr) {
+        return;
+    }
+
     FusedMoEFlagshipKernel<half> kernel;
     kernel.Init(hiddenStates, w1, w2, tempBuffer,
                 sortedTokenIds, topkWeights, sortedWeights, output, tilingData);

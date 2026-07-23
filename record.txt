@@ -1,13 +1,20 @@
 # ==================== 提交和推送（GitHub） ====================
+# --- Commit 1: RTC 运行时编译 ---
 git add CMakeLists.txt torch_op/fused_moe_flagship_op.cpp torch_op/embed_source.py record.txt
 git commit -m "Fix: switch kernel loading to RTC (runtime compilation) per PDF §2.3.1.5"
-git push origin main
-# 已推送: 2026-07-23, commit e0555ea
-# 修改内容:
+# 已推送: 2026-07-23, e0555ea
+# 修改:
 #   - embed_binary.py → embed_source.py (kernel 源码嵌入为字符串)
 #   - fused_moe_flagship_op.cpp: 改用 RTC 流程 (PDF §2.3.1.5)
 #   - CMakeLists.txt: +embed_source.py, -lacl_rtc
 #   - record.txt: +libacl_rtc.so 预加载
+
+# --- Commit 2: 修复 MIX 模式 AI Core 异常 507015 ---
+git add op_kernel/fused_moe_flagship.cpp torch_op/fused_moe_flagship_op.cpp record.txt
+git commit -m "Fix: remove MIX kernel type to fix AI Core MPU access error (507015)"
+# 已推送: 2026-07-23, 3c9336f
+# 根因: KERNEL_TYPE_MIX_AIC_1_2 但无 ASCEND_IS_AIC/AIV 隔离，AIV 核执行 MatMul 指令
+# 修复: 移除 MIX 类型声明，运行时自动检测核类型
 
 # ==================== 一键部署（Gitee） ====================
 cd /workspace && rm -rf FusedMoEFlagship FusedMoEFlagship.zip && wget https://gitee.com/zhao-xiaowei10086/FusedMoEFlagship/repository/archive/main.zip -O FusedMoEFlagship.zip && python3 -c "import zipfile; zipfile.ZipFile('FusedMoEFlagship.zip', 'r').extractall('.')" && mv FusedMoEFlagship-main FusedMoEFlagship && rm FusedMoEFlagship.zip && cd FusedMoEFlagship && rm -rf build && mkdir build && cd build && cmake .. -DASCEND_TOOLKIT_HOME=$ASCEND_TOOLKIT_HOME && make -j$(nproc) 2>&1

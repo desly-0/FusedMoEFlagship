@@ -150,19 +150,29 @@ static torch::Tensor FusedMoEFlagshipForward(
     void* sw_gm  = reinterpret_cast<void*>(sorted_weights.data_ptr());
     void* out_gm = reinterpret_cast<void*>(output.data_ptr());
 
-    // --- Allocate GM for workspace + tiling data ---
-    // workspace = gate_up intermediate per-core (kernel arg 8)
+    // --- Allocate GM for system workspace + tiling data ---
+    // workspace 布局: [sysWorkspace][padding][tilingData]
+    //   sysWorkspace: Matmul 高阶API 需要的系统 workspace (PDF §4.4.2.1.2)
+    //   padding: 原 per-core temp buffer 大小 (保持偏移对齐, 当前 kernel 使用 tempBuffer arg 3)
+    //   tilingData: FusedMoeTilingData (由 kernel 通过 __builtin_memcpy 读取)
+    size_t sysWsSize = 0;
+    {
+        auto* platform = platform_ascendc::PlatformAscendCManager::GetInstance();
+        sysWsSize = platform->GetLibApiWorkSpaceSize();
+    }
+
     size_t ws_size = static_cast<size_t>(num_cores) *
                      static_cast<size_t>(tileM) *
                      static_cast<size_t>(inter_dim) *
                      sizeof(uint16_t);
 
     void* ws_gm = nullptr;
-    ret = aclrtMalloc(&ws_gm, ws_size + sizeof(FusedMoeTilingData),
+    ret = aclrtMalloc(&ws_gm, sysWsSize + ws_size + sizeof(FusedMoeTilingData),
                       ACL_MEM_MALLOC_HUGE_FIRST);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtMalloc workspace failed: ", ret);
 
-    void* tiling_gm = static_cast<uint8_t*>(ws_gm) + ws_size;
+    // tiling 数据在系统 workspace + padding 之后
+    void* tiling_gm = static_cast<uint8_t*>(ws_gm) + sysWsSize + ws_size;
 
     // --- Generate tiling data ---
     FusedMoeTilingData tiling = {};
