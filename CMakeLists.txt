@@ -53,7 +53,7 @@ add_custom_command(
     OUTPUT ${KERNEL_OUT_DIR}/fused_moe_flagship.o
     DEPENDS ${KERNEL_SRC}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${KERNEL_OUT_DIR}
-    COMMAND ${ASCEND_TOOLKIT_HOME}/tools/bisheng/bisheng
+    COMMAND ${ASCEND_TOOLKIT_HOME}/tools/bisheng_compiler/bin/bisheng
         -x asc
         --npu-arch=dav-2201
         -O2

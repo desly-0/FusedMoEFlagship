@@ -98,7 +98,6 @@ public:
         // 总 UB 使用: 32×256×2 + 32×4 + 32×2 + 32×128×2 = 24.2KB < 256KB ✓
         uint32_t tileM = tiling.tileM;
         uint32_t tileN = tiling.tileN;
-        uint32_t interDim = tiling.intermediateDim;
 
         pipe.InitBuffer(mergeBuf_, tileM * interDim * sizeof(T));
         pipe.InitBuffer(weightLocalBuf_, tileM * sizeof(float));
@@ -267,7 +266,13 @@ extern "C" __global__ __aicore__ void fused_moe_flagship(
     GM_ADDR workspace,
     GM_ADDR tiling)
 {
-    GET_TILING_DATA(tilingData, tiling);
+    // 直调工程不支持 GET_TILING_DATA 宏, 手动从 GM 拷贝
+    FusedMoeTilingData tilingData;
+    const auto* tilingSrc = reinterpret_cast<const __gm__ uint8_t*>(tiling);
+    auto* tilingDst = reinterpret_cast<uint8_t*>(&tilingData);
+    for (uint32_t i = 0; i < sizeof(FusedMoeTilingData); i++) {
+        tilingDst[i] = tilingSrc[i];
+    }
     // MIX 模式: AIC 处理 MatMul, AIV 处理 Vector 运算
     KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
 
