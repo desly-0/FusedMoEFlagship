@@ -1,0 +1,77 @@
+# ==================== 一键部署 ====================
+cd /workspace && rm -rf FusedMoEFlagship FusedMoEFlagship.zip && wget https://gitee.com/zhao-xiaowei10086/FusedMoEFlagship/repository/archive/main.zip -O FusedMoEFlagship.zip && python3 -c "import zipfile; zipfile.ZipFile('FusedMoEFlagship.zip', 'r').extractall('.')" && mv FusedMoEFlagship-main FusedMoEFlagship && rm FusedMoEFlagship.zip && cd FusedMoEFlagship && rm -rf build && mkdir build && cd build && cmake .. -DASCEND_TOOLKIT_HOME=$ASCEND_TOOLKIT_HOME && make -j$(nproc) 2>&1
+
+# ==================== 设置环境变量 ====================
+export FUSED_MOE_FLAGSHIP_LIB=/workspace/FusedMoEFlagship/build/libfused_moe_flagship.so
+
+# ==================== 快速验证（直调，避免 vLLM 插件冲突） ====================
+python3 -c "
+import torch, os, ctypes
+os.environ['FUSED_MOE_FLAGSHIP_LIB'] = '/workspace/FusedMoEFlagship/build/libfused_moe_flagship.so'
+
+# Pre-load CANN 依赖 (确保 MultiCoreMatmulTiling vtable 可解析)
+ASCEND_HOME = os.environ.get('ASCEND_TOOLKIT_HOME', '/usr/local/Ascend/cann-8.5.0')
+for lib in ['libregister.so', 'libtiling_api.so', 'libplatform.so', 'libgraph_base.so']:
+    path = f'{ASCEND_HOME}/lib64/{lib}'
+    if os.path.exists(path):
+        ctypes.CDLL(path, ctypes.RTLD_GLOBAL)
+
+torch.ops.load_library(os.environ['FUSED_MOE_FLAGSHIP_LIB'])
+
+B, E, H, I, K = 4, 8, 64, 128, 2
+hs = torch.randn(B, H, dtype=torch.float16).npu()
+w1 = torch.randn(E, I, H, dtype=torch.float16).npu()
+w2 = torch.randn(E, H, I//2, dtype=torch.float16).npu()
+topk_w = torch.ones(B, K, dtype=torch.float32).npu()
+topk_ids = torch.randint(0, E, (B, K), dtype=torch.int32).npu()
+
+num_tokens, hidden_dim = hs.shape
+num_experts, inter_dim, _ = w1.shape
+top_k = topk_ids.shape[1]
+
+tokens_per_expert = torch.zeros(num_experts, dtype=torch.int32)
+token_offsets = torch.zeros(num_experts, dtype=torch.int32)
+for i in range(num_tokens):
+    for k in range(top_k):
+        eid = int(topk_ids[i, k])
+        tokens_per_expert[eid] += 1
+aligned_offset = 0
+for i in range(num_experts):
+    token_offsets[i] = aligned_offset
+    aligned = ((int(tokens_per_expert[i]) + 31) // 32) * 32
+    tokens_per_expert[i] = aligned
+    aligned_offset += aligned
+num_tokens_post_padded = aligned_offset
+
+sorted_ids = torch.full((num_tokens_post_padded,), -1, dtype=torch.int32)
+sorted_w = torch.zeros(num_tokens_post_padded, dtype=torch.float32)
+cursor = token_offsets.clone()
+for ti in range(num_tokens):
+    for k in range(top_k):
+        eid = int(topk_ids[ti, k])
+        pos = int(cursor[eid])
+        sorted_ids[pos] = ti
+        sorted_w[pos] = float(topk_w[ti, k])
+        cursor[eid] += 1
+
+permuted = hs[sorted_ids.clamp(min=0).npu()]
+temp_buf = torch.empty(num_tokens_post_padded * inter_dim, dtype=torch.float16).npu()
+permuted_out = torch.zeros(num_tokens_post_padded, hidden_dim, dtype=torch.float16).npu()
+
+torch.ops.fl_custom.fused_moe_flagship(
+    permuted.npu(), w1.npu(), w2.npu(), temp_buf.npu(),
+    sorted_ids.npu(), topk_w.npu(), sorted_w.npu(), permuted_out.npu(),
+    tokens_per_expert.tolist(), token_offsets.tolist(),
+    'silu', num_tokens_post_padded, 1)
+
+mask = sorted_ids != -1
+valid_idx = torch.where(mask)[0]
+orig_tokens = sorted_ids[valid_idx]
+valid_out = permuted_out[valid_idx.npu()]
+output = torch.zeros(B, H, dtype=torch.float16).npu()
+output.index_add_(0, orig_tokens.npu(), valid_out.npu())
+
+print('Output shape:', output.shape)
+print('Output sample:', output[0, :8])
+print('Flagship custom op OK!')
+"

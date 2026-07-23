@@ -209,10 +209,13 @@ target_link_directories(fused_moe_flagship PRIVATE
 
 target_link_libraries(fused_moe_flagship
     ${TORCH_LIBRARIES}       # libtorch.so, libtorch_cpu.so
+    -Wl,--no-as-needed       # 强制链接 CANN 库 (避免 --as-needed 丢弃 vtable 符号)
     ascendcl                 # ACL runtime: aclrtBinaryLoadFromData, aclrtLaunchKernelWithConfig
     register                 # MultiCoreMatmulTiling (adv_api/matmul/bmm_tiling.h)
+    tiling_api               # PlatformAscendCManager (接口参考 6.2.2)
     platform                 # PlatformAscendC (tiling/platform/platform_ascendc.h)
     graph_base               # ge::Shape (dependency of tiling headers)
+    -Wl,--as-needed          # 恢复默认行为
 )
 
 target_compile_features(fused_moe_flagship PUBLIC cxx_std_17)
