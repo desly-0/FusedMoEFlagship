@@ -119,3 +119,34 @@ print('Output shape:', output.shape)
 print('Output sample:', output[0, :8])
 print('Flagship custom op OK!')
 "
+
+# ==================== 诊断: 检查 GetLibApiWorkSpaceSize ====================
+# 编译运行:
+#   cd /workspace/FusedMoEFlagship/build && g++ -std=c++11 \
+#     -I/usr/local/Ascend/cann-8.5.0/include \
+#     -L/usr/local/Ascend/cann-8.5.0/lib64 \
+#     ../check_ws.cpp -lascendcl -lplatform -o check_ws \
+#   && LD_PRELOAD=/usr/local/Ascend/cann-8.5.0/lib64/libascendcl.so ./check_ws
+# check_ws.cpp:
+cat > /workspace/FusedMoEFlagship/check_ws.cpp << 'CHECK_EOF'
+#include <iostream>
+#include "acl/acl.h"
+#include "tiling/platform/platform_ascendc.h"
+
+int main() {
+    aclInit(nullptr);
+    int32_t devId = 0;
+    aclrtSetDevice(devId);
+
+    auto* platform = platform_ascendc::PlatformAscendCManager::GetInstance();
+    size_t sysWsSize = platform->GetLibApiWorkSpaceSize();
+    std::cout << "GetLibApiWorkSpaceSize() = " << sysWsSize << std::endl;
+
+    uint32_t coreNum = platform->GetCoreNumAic();
+    std::cout << "GetCoreNumAic() = " << coreNum << std::endl;
+
+    aclrtResetDevice(devId);
+    aclFinalize();
+    return 0;
+}
+CHECK_EOF
