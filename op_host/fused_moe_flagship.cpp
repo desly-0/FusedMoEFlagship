@@ -176,7 +176,7 @@ ge::graphStatus FusedMoEFlagshipTiling(gert::TilingContext* context)
         return ge::GRAPH_FAILED;
     }
     auto* src = reinterpret_cast<const uint8_t*>(&tiling);
-    auto* dst = rawTiling->GetData();
+    auto* dst = static_cast<uint8_t*>(rawTiling->GetData());
     for (uint64_t i = 0; i < sizeof(FusedMoeTilingData); i++) {
         dst[i] = src[i];
     }
@@ -297,8 +297,9 @@ public:
     }
 };
 
+    // ---- 注册算子 ----
+    // 接口参考 6.3.1 OP_ADD
+    OP_ADD(FusedMoEFlagship);
+
 }  // namespace ops
 
-// ---- 注册算子 ----
-// 接口参考 6.3.1 OP_ADD
-OP_ADD(ops::FusedMoEFlagship);
