@@ -42,8 +42,8 @@ git commit -m "Fix: add ACL_RT_BINARY_MAGIC_ELF_AI_CORE to resolve 507014 timeou
 #   kernel 侧: 更新注释, KERNEL_TYPE_AICORE 为预留参数不可用,
 #             编译器默认生成 AI Core 代码, 无需显式声明
 
-# ==================== 一键部署（Gitee） ====================
-cd /workspace && rm -rf FusedMoEFlagship FusedMoEFlagship.zip && wget https://gitee.com/zhao-xiaowei10086/FusedMoEFlagship/repository/archive/main.zip -O FusedMoEFlagship.zip && python3 -c "import zipfile; zipfile.ZipFile('FusedMoEFlagship.zip', 'r').extractall('.')" && mv FusedMoEFlagship-main FusedMoEFlagship && rm FusedMoEFlagship.zip && cd FusedMoEFlagship && rm -rf build && mkdir build && cd build && cmake .. -DASCEND_TOOLKIT_HOME=$ASCEND_TOOLKIT_HOME && make -j$(nproc) 2>&1
+# ==================== 一键部署 + 诊断（Gitee） ====================
+cd /workspace && rm -rf FusedMoEFlagship FusedMoEFlagship.zip && wget https://gitee.com/zhao-xiaowei10086/FusedMoEFlagship/repository/archive/main.zip -O FusedMoEFlagship.zip && python3 -c "import zipfile; zipfile.ZipFile('FusedMoEFlagship.zip', 'r').extractall('.')" && mv FusedMoEFlagship-main FusedMoEFlagship && rm FusedMoEFlagship.zip && cd FusedMoEFlagship && rm -rf build && mkdir build && cd build && cmake .. -DASCEND_TOOLKIT_HOME=$ASCEND_TOOLKIT_HOME && make -j$(nproc) 2>&1 && echo "=== check_ws: GetLibApiWorkSpaceSize + GetCoreNumAic ===" && g++ -std=c++17 -I/usr/local/Ascend/cann-8.5.0/include -I/usr/local/Ascend/cann-8.5.0/aarch64-linux/asc/include /workspace/FusedMoEFlagship/check_ws.cpp -Wl,--no-as-needed -L/usr/local/Ascend/cann-8.5.0/lib64 -L/usr/local/Ascend/cann-8.5.0/aarch64-linux/lib64 -lascendcl -ltiling_api -lplatform -lregister -lgraph_base -o /workspace/FusedMoEFlagship/build/check_ws && LD_PRELOAD=/usr/local/Ascend/cann-8.5.0/lib64/libascendcl.so /workspace/FusedMoEFlagship/build/check_ws
 
 # ==================== 设置环境变量 ====================
 export FUSED_MOE_FLAGSHIP_LIB=/workspace/FusedMoEFlagship/build/libfused_moe_flagship.so
@@ -119,28 +119,3 @@ print('Output shape:', output.shape)
 print('Output sample:', output[0, :8])
 print('Flagship custom op OK!')
 "
-
-# ==================== 诊断: 检查 GetLibApiWorkSpaceSize ====================
-cat > /workspace/FusedMoEFlagship/check_ws.cpp << 'CHECK_EOF'
-#include <iostream>
-#include "acl/acl.h"
-#include "tiling/platform/platform_ascendc.h"
-
-int main() {
-    aclInit(nullptr);
-    int32_t devId = 0;
-    aclrtSetDevice(devId);
-
-    auto* platform = platform_ascendc::PlatformAscendCManager::GetInstance();
-    size_t sysWsSize = platform->GetLibApiWorkSpaceSize();
-    std::cout << "GetLibApiWorkSpaceSize() = " << sysWsSize << std::endl;
-
-    uint32_t coreNum = platform->GetCoreNumAic();
-    std::cout << "GetCoreNumAic() = " << coreNum << std::endl;
-
-    aclrtResetDevice(devId);
-    aclFinalize();
-    return 0;
-}
-CHECK_EOF
-cd /workspace/FusedMoEFlagship/build && g++ -std=c++17 -I/usr/local/Ascend/cann-8.5.0/include -I/usr/local/Ascend/cann-8.5.0/aarch64-linux/asc/include /workspace/FusedMoEFlagship/check_ws.cpp -Wl,--no-as-needed -L/usr/local/Ascend/cann-8.5.0/lib64 -L/usr/local/Ascend/cann-8.5.0/aarch64-linux/lib64 -lascendcl -ltiling_api -lplatform -lregister -lgraph_base -o check_ws && LD_PRELOAD=/usr/local/Ascend/cann-8.5.0/lib64/libascendcl.so ./check_ws

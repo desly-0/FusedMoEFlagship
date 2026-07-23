@@ -225,7 +225,9 @@ static torch::Tensor FusedMoEFlagshipForward(
                            "fused_moe_flagship", 0, nullptr, nullptr);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCreateProg failed: ", ret);
 
-    const char* compileOpts[] = {"--npu-arch=dav-2201", "-O2"};
+    // PDF §CV融合.txt: 非工程化算子直调工程须手动 SetSysWorkspace,
+    // REGIST_MATMUL_OBJ 需要 HAVE_WORKSPACE 宏以正确初始化 MatMul 内部 workspace 管理。
+    const char* compileOpts[] = {"--npu-arch=dav-2201", "-O2", "-DHAVE_WORKSPACE"};
     ret = aclrtcCompileProg(rtcProg, 2, compileOpts);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCompileProg failed: ", ret);
 
