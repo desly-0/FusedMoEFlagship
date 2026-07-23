@@ -74,10 +74,11 @@ static bool GenerateStandaloneMatmulTiling(
     int32_t m, int32_t n, int32_t k,
     bool transB)
 {
-    // Default PlatformAscendC constructor detects current NPU SOC
-    platform_ascendc::PlatformAscendC platform;
+    // Kernel Launch (直调) 模式: 使用 PlatformAscendCManager::GetInstance()
+    // 接口参考 6.2.2: 自动检测当前 NPU 硬件, 无需传入 soc version
+    auto* platform = platform_ascendc::PlatformAscendCManager::GetInstance();
 
-    matmul_tiling::MultiCoreMatmulTiling tilingObj(platform);
+    matmul_tiling::MultiCoreMatmulTiling tilingObj(*platform);
     tilingObj.SetDim(1);
 
     tilingObj.SetAType(matmul_tiling::TPosition::GM,
@@ -211,7 +212,8 @@ static torch::Tensor FusedMoEFlagshipForward(
     // --- Step 1: Load kernel binary (.o) ---
     //   aclrtBinaryLoadFromData(bin, size, &loadOpt, &binHandle)
     //   PDF §2.4.2 Step 1: 通过aclrtBinaryLoadFromData解析二进制数据
-    aclrtBinaryHandle binHandle = nullptr;
+    //   接口参考 §2.4.2 示例代码: 类型为 aclrtBinHandle (非 aclrtBinaryHandle)
+    aclrtBinHandle binHandle = nullptr;
     aclrtBinaryLoadOptions loadOption{};
     aclrtBinaryLoadOption option{};
     option.type = ACL_RT_BINARY_LOAD_OPT_LAZY_MAGIC;
@@ -280,8 +282,9 @@ static torch::Tensor FusedMoEFlagshipForward(
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtSynchronizeStream failed: ", ret);
 
     // --- Cleanup ---
+    // 接口参考 §2.4.2 示例代码: 使用 aclrtBinaryUnLoad 释放二进制句柄
     aclrtDestroyStream(stream);
-    aclrtDestroyBinary(binHandle);
+    aclrtBinaryUnLoad(binHandle);
     aclrtFree(ws_gm);
 
     return output;
