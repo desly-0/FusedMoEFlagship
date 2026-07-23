@@ -42,7 +42,7 @@ namespace optiling {
 // 接口参考 5.2.2 MultiCoreMatmulTiling
 static bool GenerateMatmulTiling(
     matmul_tiling::MultiCoreMatmulTiling& tilingObj,
-    optiling::TCubeTiling& outCubeTiling,
+    AscendC::tiling::TCubeTiling& outCubeTiling,
     int32_t m, int32_t n, int32_t k,
     bool transB)
 {
@@ -106,29 +106,29 @@ ge::graphStatus FusedMoEFlagshipTiling(gert::TilingContext* context)
     int32_t numCores = std::max(1, std::min({maxCores, numExperts, numCoresFromAttr}));
 
     // ---- 4. 填充 TilingData ----
-    // 直调工程: 使用 POD 结构体 + 手动字节拷贝到 rawTiling 缓冲区
-    FusedMoeTilingData tiling;
-    tiling.numTokens       = static_cast<uint32_t>(numTokens);
-    tiling.hiddenDim       = static_cast<uint32_t>(hiddenDim);
-    tiling.intermediateDim = static_cast<uint32_t>(interDim);
-    tiling.numExperts      = static_cast<uint32_t>(numExperts);
-    tiling.topK            = static_cast<uint32_t>(topK);
-    tiling.tileM           = static_cast<uint32_t>(tileM);
-    tiling.tileK           = static_cast<uint32_t>(tileK);
-    tiling.tileN           = static_cast<uint32_t>(tileN);
-    tiling.numCores        = static_cast<uint32_t>(numCores);
+    // 标准 C++ POD: GetTilingData<T>() 返回框架管理的 buffer 指针 (PDF 2.9.2.5.4 Step 2)
+    FusedMoeTilingData* tiling = context->GetTilingData<FusedMoeTilingData>();
+    tiling->numTokens       = static_cast<uint32_t>(numTokens);
+    tiling->hiddenDim       = static_cast<uint32_t>(hiddenDim);
+    tiling->intermediateDim = static_cast<uint32_t>(interDim);
+    tiling->numExperts      = static_cast<uint32_t>(numExperts);
+    tiling->topK            = static_cast<uint32_t>(topK);
+    tiling->tileM           = static_cast<uint32_t>(tileM);
+    tiling->tileK           = static_cast<uint32_t>(tileK);
+    tiling->tileN           = static_cast<uint32_t>(tileN);
+    tiling->numCores        = static_cast<uint32_t>(numCores);
 
     // ListInt 属性: GetAttrPointer<T>(index) 返回数组指针
     const int64_t* tokensPerExpertVal = attrs->GetAttrPointer<int64_t>(0);
     const int64_t* tokenOffsetsVal    = attrs->GetAttrPointer<int64_t>(1);
     int32_t expCount = std::min(numExperts, MAX_EXPERTS);
     for (int32_t i = 0; i < expCount; i++) {
-        tiling.tokensPerExpert[i] = static_cast<uint32_t>(tokensPerExpertVal[i]);
-        tiling.tokenOffsets[i]    = static_cast<uint32_t>(tokenOffsetsVal[i]);
+        tiling->tokensPerExpert[i] = static_cast<uint32_t>(tokensPerExpertVal[i]);
+        tiling->tokenOffsets[i]    = static_cast<uint32_t>(tokenOffsetsVal[i]);
     }
 
     // Int 属性: 官方模式使用 *(GetAttrPointer<T>(idx)) 解引用
-    tiling.numTokensPostPadded = static_cast<uint32_t>(
+    tiling->numTokensPostPadded = static_cast<uint32_t>(
         *(attrs->GetAttrPointer<int64_t>(3)));
 
     // ---- 5. 生成 Cube Tiling 参数 ----
@@ -137,7 +137,7 @@ ge::graphStatus FusedMoEFlagshipTiling(gert::TilingContext* context)
         matmul_tiling::MultiCoreMatmulTiling mm1Tiling(platform);
         if (!GenerateMatmulTiling(
                 mm1Tiling,
-                reinterpret_cast<optiling::TCubeTiling&>(tiling.cubeTilingMM1),
+                tiling->cubeTilingMM1,
                 tileM, interDim, tileK, true)) {
             context->SetTilingKey(-1);
             return ge::GRAPH_FAILED;
@@ -149,7 +149,7 @@ ge::graphStatus FusedMoEFlagshipTiling(gert::TilingContext* context)
         matmul_tiling::MultiCoreMatmulTiling mm2Tiling(platform);
         if (!GenerateMatmulTiling(
                 mm2Tiling,
-                reinterpret_cast<optiling::TCubeTiling&>(tiling.cubeTilingMM2),
+                tiling->cubeTilingMM2,
                 tileM, hiddenDim, tileN, true)) {
             context->SetTilingKey(-1);
             return ge::GRAPH_FAILED;
@@ -169,18 +169,7 @@ ge::graphStatus FusedMoEFlagshipTiling(gert::TilingContext* context)
     // ---- 7. 输出 Tiling 信息 ----
     context->SetBlockDim(static_cast<uint32_t>(numCores));
     context->SetTilingKey(1);  // TilingKey = 1 → 正常模式
-
-    // 序列化 TilingData 到 raw buffer (直调工程, 手动拷贝)
-    auto* rawTiling = context->GetRawTilingData();
-    if (sizeof(FusedMoeTilingData) > rawTiling->GetCapacity()) {
-        return ge::GRAPH_FAILED;
-    }
-    auto* src = reinterpret_cast<const uint8_t*>(&tiling);
-    auto* dst = static_cast<uint8_t*>(rawTiling->GetData());
-    for (uint64_t i = 0; i < sizeof(FusedMoeTilingData); i++) {
-        dst[i] = src[i];
-    }
-    rawTiling->SetDataSize(sizeof(FusedMoeTilingData));
+    // GetTilingData<T>() 自动管理数据大小, 无需手动 SaveToBuffer
 
     return ge::GRAPH_SUCCESS;
 }

@@ -84,21 +84,19 @@ public:
         // API 约束: REGIST_MATMUL_OBJ 只能注册一个 Matmul 对象 (接口参考 5.2.1)
         // 两个 Matmul 对象需要两次独立注册
         // 传 &tiling 时 REGIST_MATMUL_OBJ 内部会调用 Init，不需要额外 mm.Init()
-        TCubeTiling* cubeTilingMM1 =
-            reinterpret_cast<TCubeTiling*>(&(tiling_.cubeTilingMM1));
-        TCubeTiling* cubeTilingMM2 =
-            reinterpret_cast<TCubeTiling*>(&(tiling_.cubeTilingMM2));
+        // tiling_.cubeTilingMM1/2 为 AscendC::tiling::TCubeTiling 类型 (PDF 2.9.2.5.4)
         REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(),
-                          mm1_, cubeTilingMM1);
+                          mm1_, &tiling_.cubeTilingMM1);
         REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(),
-                          mm2_, cubeTilingMM2);
+                          mm2_, &tiling_.cubeTilingMM2);
 
         // 分配 Local Memory (UB) 缓冲区 (P0+P3+P4 优化后布局)
         //   mergeBuf:      tileM × interDim × sizeof(T)   (合并 DataCopy: gate_up 整体 → 视图切片)
         //   weightLocal:   tileM × sizeof(float)           (F32 权重加载)
         //   weightTmp:     tileM × sizeof(T)               (F32→T 转换缓冲)
         //   weightBCast:   tileM × tileN × sizeof(T)       (Broadcast 展开, 用于批量 Mul)
-        // 总 UB 使用: 32×256×2 + 32×4 + 32×2 + 32×128×2 = 24.2KB < 256KB ✓
+        //   siluBuf:       tileM × tileN × sizeof(T)       (Silu 独立输出, PDF 5.3.5 禁止 src/dst 重叠)
+        // 总 UB 使用: 32×256×2 + 32×4 + 32×2 + 32×128×2 + 32×128×2 = 32.2KB < 256KB ✓
         uint32_t tileM = tiling.tileM;
         uint32_t tileN = tiling.tileN;
 
@@ -106,6 +104,7 @@ public:
         pipe.InitBuffer(weightLocalBuf_, tileM * sizeof(float));
         pipe.InitBuffer(weightTmpBuf_, tileM * sizeof(T));
         pipe.InitBuffer(weightBCastBuf_, tileM * tileN * sizeof(T));
+        pipe.InitBuffer(siluBuf_, tileM * tileN * sizeof(T));
     }
 
     __aicore__ inline void Process() {
@@ -169,8 +168,10 @@ public:
                 LocalTensor<T> upView = mergeBuf_.GetWithOffset<T>(
                     curTileM * tileN, curTileM * tileN * sizeof(T));
 
-                Silu(gateView, gateView, curTileM * tileN);
-                Mul(gateView, gateView, upView, curTileM * tileN);
+                // Fix: 使用独立 buffer 避免 src/dst 重叠 (PDF 5.3.5 Silu 禁止地址重叠)
+                LocalTensor<T> activated = siluBuf_.Get<T>(curTileM * tileN);
+                Silu(activated, gateView, curTileM * tileN);
+                Mul(activated, activated, upView, curTileM * tileN);
 
                 // ==========================================================
                 // Phase 2.5 (P3: Broadcast + Mul 批量权重缩放)
@@ -201,7 +202,7 @@ public:
                     Broadcast<T, 2, 1>(weightBCast, weightT,
                                           bDstShape, bSrcShape);
 
-                    Mul(gateView, gateView, weightBCast, curTileM * tileN);
+                    Mul(activated, activated, weightBCast, curTileM * tileN);
                 }
 
                 // ==========================================================
@@ -209,10 +210,10 @@ public:
                 //   activated [curTileM, tileN] × w2[expIdx] [tileK, tileN]^T
                 //   → output [curTileM, tileK]
                 //
-                //   gateView 中的数据是 activated 结果 →
+                //   activated 中的数据是 silu(gate) × up × weight 结果 →
                 //   DataCopy to tempGM (MM2 的 GM 输入)
                 // ==========================================================
-                DataCopy(tempGM_, gateView, curTileM * tileN);
+                DataCopy(tempGM_, activated, curTileM * tileN);
 
                 mm2_.SetTensorA(tempGM_, false);
                 mm2_.SetTensorB(w2GM_[w2Offset], true);
@@ -243,16 +244,18 @@ private:
     TBuf<TPosition::VECCALC> weightLocalBuf_;       // weight [tileM] (F32 per-token weight, 加载用)
     TBuf<TPosition::VECCALC> weightTmpBuf_;         // weight [tileM] (T 类型, 转换后)
     TBuf<TPosition::VECCALC> weightBCastBuf_;       // weight [tileM, tileN] (T 类型, Broadcast 展开)
+    TBuf<TPosition::VECCALC> siluBuf_;               // Silu 独立输出 buf (PDF 5.3.5 禁止 src/dst 重叠)
 
     // MatMul 对象:
     //   A: GM, ND, half  | B: GM, ND, half (transposed) | C: GM, ND, half
-    //   transposed 通过 SetTensorB(bool) 参数控制, 不在 MatmulType 中
+    //   ISTRANS=true on B MatmulType: SetTensorB(gm, true) 需要与模板参数一致
+    //   PDF 5.2.1 MatmulType: ISTRANS=false + isTransposeB=true 会导致精度错误
     Matmul<MatmulType<TPosition::GM, CubeFormat::ND, T>,
-           MatmulType<TPosition::GM, CubeFormat::ND, T>,
+           MatmulType<TPosition::GM, CubeFormat::ND, T, true>,
            MatmulType<TPosition::GM, CubeFormat::ND, T>> mm1_;
 
     Matmul<MatmulType<TPosition::GM, CubeFormat::ND, T>,
-           MatmulType<TPosition::GM, CubeFormat::ND, T>,
+           MatmulType<TPosition::GM, CubeFormat::ND, T, true>,
            MatmulType<TPosition::GM, CubeFormat::ND, T>> mm2_;
 };
 
@@ -269,13 +272,9 @@ extern "C" __global__ __aicore__ void fused_moe_flagship(
     GM_ADDR workspace,
     GM_ADDR tiling)
 {
-    // 直调工程不支持 GET_TILING_DATA 宏, 手动从 GM 拷贝
-    FusedMoeTilingData tilingData;
-    const auto* tilingSrc = reinterpret_cast<const __gm__ uint8_t*>(tiling);
-    auto* tilingDst = reinterpret_cast<uint8_t*>(&tilingData);
-    for (uint32_t i = 0; i < sizeof(FusedMoeTilingData); i++) {
-        tilingDst[i] = tilingSrc[i];
-    }
+    // 标准 C++ POD Tiling 结构体注册 (PDF 2.9.2.5.4 Step 3)
+    REGISTER_TILING_DEFAULT(FusedMoeTilingData);
+    GET_TILING_DATA(tilingData, tiling);
     // MIX 模式: AIC 处理 MatMul, AIV 处理 Vector 运算
     KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
 

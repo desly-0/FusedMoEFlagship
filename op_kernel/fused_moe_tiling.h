@@ -1,19 +1,18 @@
 // ============================================================
 // fused_moe_tiling.h — Tiling 结构体定义 (Kernel + Host 共享)
 //
-// Host 侧填充所有参数, 通过 tiling_data GM 地址传给核函数。
-// cubeTilingMM1/2 由 Host 侧 MultiCoreMatmulTiling::GetTiling()
-// 填充为 TCubeTiling 二进制数据，Kernel 侧通过
-// reinterpret_cast<TCubeTiling*> 访问。
+// 使用标准 C++ POD 语法定义 Tiling 结构体 (PDF 2.9.2.5.4)
+// - TCubeTiling 来自 kernel_tiling/kernel_tiling.h（Kernel 侧命名空间）
+// - Host 侧通过 MultiCoreMatmulTiling::GetTiling() 直接填充 TCubeTiling 成员
+// - Kernel 侧通过 REGISTER_TILING_DEFAULT + GET_TILING_DATA 注册并解析
 //
 // 平台: Ascend 910B, CANN 8.5.0
 // ============================================================
 #pragma once
 
 #include <cstdint>
+#include "kernel_tiling/kernel_tiling.h"
 
-// Host 侧 Tiling 函数填充此结构体，通过 REGISTER_TILING_DEFAULT 注册。
-// Kernel 侧通过 GET_TILING_DATA 或 GetTilingData<T>() 获取。
 struct FusedMoeTilingData {
     // ----- 全局形状参数 -----
     uint32_t numTokens;             // 总 token 数
@@ -35,12 +34,11 @@ struct FusedMoeTilingData {
     uint32_t tokensPerExpert[64];
     uint32_t tokenOffsets[64];
 
-    // ----- MatMul Tiling 数据 (TCubeTiling 二进制) -----
-    // Host 侧通过 MultiCoreMatmulTiling::GetTiling() 填充。
-    // Kernel 侧通过 REGIST_MATMUL_OBJ 注册，转换回 TCubeTiling*。
-    // 512 字节足够容纳 TCubeTiling (实际约 200-300 字节)。
-    uint8_t cubeTilingMM1[512];
-    uint8_t cubeTilingMM2[512];
+    // ----- MatMul Tiling 数据 (PDF 2.9.2.5.4) -----
+    // Host 侧通过 MultiCoreMatmulTiling::GetTiling() 直接填充此成员。
+    // Kernel 侧通过 REGIST_MATMUL_OBJ(&pipe, ws, mmObj, &tiling.cubeTilingMMx) 注册。
+    AscendC::tiling::TCubeTiling cubeTilingMM1;
+    AscendC::tiling::TCubeTiling cubeTilingMM2;
 };
 
 // 编译期检查: 确保 TilingData 结构体大小在合理范围内
