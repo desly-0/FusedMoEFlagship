@@ -225,10 +225,11 @@ static torch::Tensor FusedMoEFlagshipForward(
                            "fused_moe_flagship", 0, nullptr, nullptr);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCreateProg failed: ", ret);
 
-    // PDF §CV融合.txt: 非工程化算子直调工程须手动 SetSysWorkspace,
-    // REGIST_MATMUL_OBJ 需要 HAVE_WORKSPACE 宏以正确初始化 MatMul 内部 workspace 管理。
-    const char* compileOpts[] = {"--npu-arch=dav-2201", "-O2", "-DHAVE_WORKSPACE"};
-    ret = aclrtcCompileProg(rtcProg, 2, compileOpts);
+    // bisheng 编译 kernel 时使用 -x asc 标志（CMakeLists.txt §2.3.1.3），
+    // RTC 编译 source 为字符串而非 .asc 文件，bisheng 无法自动检测语言类型，
+    // 不加 -x asc 会导致 REGIST_MATMUL_OBJ/MatMul 代码生成不正确 → FixPipe 挂死。
+    const char* compileOpts[] = {"--npu-arch=dav-2201", "-O2", "-x", "asc"};
+    ret = aclrtcCompileProg(rtcProg, 4, compileOpts);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCompileProg failed: ", ret);
 
     size_t binSize = 0;
