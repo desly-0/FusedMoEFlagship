@@ -227,6 +227,17 @@ static torch::Tensor FusedMoEFlagshipForward(
     ret = aclrtcGetBinData(rtcProg, binData.data());
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcGetBinData failed: ", ret);
 
+    // --- Read RTC compile log (PDF §2.3.1.5: 编译日志调试) ---
+    size_t logSize = 0;
+    if (aclrtcGetCompileLogSize(rtcProg, &logSize) == ACL_SUCCESS && logSize > 0) {
+        std::vector<char> compileLog(logSize);
+        if (aclrtcGetCompileLog(rtcProg, compileLog.data()) == ACL_SUCCESS) {
+            std::string logStr(compileLog.data(), logSize);
+            if (!logStr.empty())
+                std::cerr << "[RTC Compile Log]: " << logStr << std::endl;
+        }
+    }
+
     // --- Step 2: Load compiled binary (PDF §2.4.2) ---
     aclrtBinHandle binHandle = nullptr;
     ret = aclrtBinaryLoadFromData(

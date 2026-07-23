@@ -275,8 +275,8 @@ extern "C" __global__ __aicore__ void fused_moe_flagship(
     // 也会因 TCubeTiling 的非平凡构造函数而失败)
     FusedMoeTilingData tilingData;
     __builtin_memcpy(&tilingData, tiling, sizeof(FusedMoeTilingData));
-    // MIX 模式: AIC 处理 MatMul, AIV 处理 Vector 运算
-    KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
+    // 使用默认 Kernel 类型（自动检测），AIC 和 AIV 核均可执行全部计算
+    // 避免 MIX 模式需 ASCEND_IS_AIC/AIV 隔离 + ASCENDC_CUBE_ONLY (CV 融合 §3.3.5.1)
 
     FusedMoEFlagshipKernel<half> kernel;
     kernel.Init(hiddenStates, w1, w2, tempBuffer,

@@ -1,4 +1,15 @@
-# ==================== 一键部署 ====================
+# ==================== 提交和推送（GitHub） ====================
+git add CMakeLists.txt torch_op/fused_moe_flagship_op.cpp torch_op/embed_source.py record.txt
+git commit -m "Fix: switch kernel loading to RTC (runtime compilation) per PDF §2.3.1.5"
+git push origin main
+# 已推送: 2026-07-23, commit e0555ea
+# 修改内容:
+#   - embed_binary.py → embed_source.py (kernel 源码嵌入为字符串)
+#   - fused_moe_flagship_op.cpp: 改用 RTC 流程 (PDF §2.3.1.5)
+#   - CMakeLists.txt: +embed_source.py, -lacl_rtc
+#   - record.txt: +libacl_rtc.so 预加载
+
+# ==================== 一键部署（Gitee） ====================
 cd /workspace && rm -rf FusedMoEFlagship FusedMoEFlagship.zip && wget https://gitee.com/zhao-xiaowei10086/FusedMoEFlagship/repository/archive/main.zip -O FusedMoEFlagship.zip && python3 -c "import zipfile; zipfile.ZipFile('FusedMoEFlagship.zip', 'r').extractall('.')" && mv FusedMoEFlagship-main FusedMoEFlagship && rm FusedMoEFlagship.zip && cd FusedMoEFlagship && rm -rf build && mkdir build && cd build && cmake .. -DASCEND_TOOLKIT_HOME=$ASCEND_TOOLKIT_HOME && make -j$(nproc) 2>&1
 
 # ==================== 设置环境变量 ====================
