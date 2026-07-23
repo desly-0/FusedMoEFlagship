@@ -41,11 +41,19 @@ hidden_states           w1 (gate+up)
 └── vllm-plugin-FL/                    # FL 插件（算子集成目标系统）
 ```
 
+## 环境要求
+
+- **CANN 版本**: 8.5.0 (必须)
+- **目标平台**: Ascend 910B (dav-2201)
+- **工具链**: bisheng_compiler (kernel .o) + g++ (host .so)
+- **API 参考**: CANN 社区版 8.5.0 Ascend C 算子开发接口参考 (2026-04-02)
+
+> 注意: 本项目依赖 CANN 8.5.0 特有的 API (gert::TilingContext, RuntimeAttrs 等)，
+> 不保证与旧版本 CANN 兼容。使用前请确认 `ASCEND_TOOLKIT_HOME` 指向 CANN 8.5.0 安装路径。
+
 ## 使用方法
 
 ### 编译
-
-需要 CANN 8.5.0 工具链，目标平台为 Ascend 910B (dav-2201)。
 
 ```bash
 export ASCEND_TOOLKIT_HOME=/usr/local/Ascend/ascend-toolkit/latest
