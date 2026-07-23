@@ -81,13 +81,11 @@ public:
         // ==== 注册 Matmul 对象 (必须在 pipe.InitBuffer 之前) ====
         // API 约束: 分离模式中 REGIST_MATMUL_OBJ 必须在 InitBuffer 前调用
         // 详见: 5.2.1.14 REGIST_MATMUL_OBJ, 5.2.1.15 Init
-        // API 约束: REGIST_MATMUL_OBJ 只能注册一个 Matmul 对象 (接口参考 5.2.1)
-        // 两个 Matmul 对象需要两次独立注册
+        // API 约束: 多个 Matmul 对象必须在同一次 REGIST_MATMUL_OBJ 调用中传入
         // 传 &tiling 时 REGIST_MATMUL_OBJ 内部会调用 Init，不需要额外 mm.Init()
         // tiling_.cubeTilingMM1/2 为 AscendC::tiling::TCubeTiling 类型 (PDF 2.9.2.5.4)
         REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(),
-                          mm1_, &tiling_.cubeTilingMM1);
-        REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(),
+                          mm1_, &tiling_.cubeTilingMM1,
                           mm2_, &tiling_.cubeTilingMM2);
 
         // 分配 Local Memory (UB) 缓冲区 (P0+P3+P4 优化后布局)
