@@ -95,8 +95,6 @@ add_library(fused_moe_flagship_host SHARED ${HOST_SRC})
 target_include_directories(fused_moe_flagship_host PRIVATE ${HOST_INCLUDE_DIRS})
 target_link_directories(fused_moe_flagship_host PRIVATE ${HOST_LINK_DIRS})
 target_link_libraries(fused_moe_flagship_host
-    ascendc
-    ascendeclib
     ge_compiler
     runtime
 )
