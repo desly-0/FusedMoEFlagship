@@ -256,7 +256,7 @@ static torch::Tensor FusedMoEFlagshipForward(
     aclrtBinHandle binHandle = nullptr;
     aclrtBinaryLoadOption loadOpt;
     loadOpt.type = ACL_RT_BINARY_LOAD_OPT_MAGIC;
-    loadOpt.value.magic = ACL_RT_BINARY_MAGIC_ELF_AI_CORE;
+    loadOpt.value.magic = ACL_RT_BINARY_MAGIC_ELF_AICORE;
     aclrtBinaryLoadOptions loadOpts;
     loadOpts.numOpt = 1;
     loadOpts.options = &loadOpt;
