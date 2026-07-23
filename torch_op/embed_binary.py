@@ -18,13 +18,14 @@ def main():
         f.write('#include <cstddef>\n')
         f.write('#include <cstdint>\n')
         f.write('extern "C" {\n')
-        f.write(f'const unsigned char {prefix}Binary[] = {{\n')
+        # Note: must add 'extern' to override C++ const internal linkage rule
+        f.write(f'extern const unsigned char {prefix}Binary[] = {{\n')
         for i in range(0, len(data), 16):
             chunk = data[i:i+16]
             hex_bytes = ", ".join(f"0x{b:02x}" for b in chunk)
             f.write(f"  {hex_bytes},\n")
         f.write('};\n')
-        f.write(f'const size_t {prefix}BinarySize = sizeof({prefix}Binary);\n')
+        f.write(f'extern const size_t {prefix}BinarySize = sizeof({prefix}Binary);\n')
         f.write('}\n')
 
     print(f"Embedded {len(data)} bytes from {in_path} -> {out_path}")
