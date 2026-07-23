@@ -19,9 +19,8 @@
 #include "register/op_def_registry.h"
 
 // Matmul 多核 Tiling API (接口参考 5.2.2, p.1187)
-// 单核: #include "lib/matmul/matmul_tiling.h"
-// 多核: #include "lib/matmul/bmm_tiling.h"
-#include "lib/matmul/bmm_tiling.h"
+// PDF 写 lib/matmul/bmm_tiling.h, 但实际安装路径为 adv_api/matmul/bmm_tiling.h
+#include "adv_api/matmul/bmm_tiling.h"
 
 // 平台信息 API (接口参考 6.2.1 PlatformAscendC)
 #include "tiling/platform/platform_ascendc.h"

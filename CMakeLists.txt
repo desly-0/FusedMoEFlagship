@@ -83,7 +83,8 @@ set(HOST_OUT_DIR
 set(HOST_INCLUDE_DIRS
     ${ASCEND_TOOLKIT_HOME}/include
     ${ASCEND_TOOLKIT_HOME}/include/toolchain
-    ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel   # 为了 fused_moe_tiling.h
+    ${ASCEND_TOOLKIT_HOME}/aarch64-linux/asc/include   # adv_api/matmul/bmm_tiling.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel               # fused_moe_tiling.h
 )
 
 set(HOST_LINK_DIRS
