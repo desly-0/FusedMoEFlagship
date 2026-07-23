@@ -270,9 +270,9 @@ extern "C" __global__ __aicore__ void fused_moe_flagship(
     GM_ADDR workspace,
     GM_ADDR tiling)
 {
-    // 标准 C++ POD Tiling 结构体注册 (PDF 2.9.2.5.4 Step 3)
-    REGISTER_TILING_DEFAULT(FusedMoeTilingData);
-    GET_TILING_DATA(tilingData, tiling);
+    // 直调工程: 手动从 GM 拷贝 Tiling 结构体
+    // REGISTER_TILING_DEFAULT + GET_TILING_DATA 不支持直调工程 (PDF §4.13)
+    FusedMoeTilingData tilingData = *reinterpret_cast<__gm__ FusedMoeTilingData*>(tiling);
     // MIX 模式: AIC 处理 MatMul, AIV 处理 Vector 运算
     KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2);
 
