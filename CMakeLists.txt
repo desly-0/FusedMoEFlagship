@@ -134,7 +134,7 @@ add_custom_target(fused_moe_package ALL
 # 注册 torch.ops.fl_custom.fused_moe_flagship。
 #
 # 包含:
-#   - 核函数 .o (嵌入为二进制数组)
+#   - kernel 源码 (嵌入为字符串, RTC 运行时编译)
 #   - tiling 生成 (MultiCoreMatmulTiling)
 #   - ACL runtime kernel 启动
 
@@ -171,25 +171,27 @@ if(NOT Python3_FOUND)
         "If compilation fails, set -DPython3_INCLUDE_DIRS=<path-to-Python.h>")
 endif()
 
-# ---- 2. 嵌入 kernel .o → C++ 源文件 ----
-set(KERNEL_BIN_CPP ${CMAKE_CURRENT_BINARY_DIR}/torch_op/kernel_bin.cpp)
+# ---- 2. 嵌入 kernel 源码 → C++ 用于 RTC (PDF §2.3.1.5) ----
+set(KERNEL_SRC_CPP ${CMAKE_CURRENT_BINARY_DIR}/torch_op/kernel_src.cpp)
 
 add_custom_command(
-    OUTPUT ${KERNEL_BIN_CPP}
-    DEPENDS ${KERNEL_OUT_DIR}/fused_moe_flagship.o
+    OUTPUT ${KERNEL_SRC_CPP}
+    DEPENDS
+        ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel/fused_moe_flagship.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel/fused_moe_tiling.h
     COMMAND ${CMAKE_COMMAND} -E make_directory
         ${CMAKE_CURRENT_BINARY_DIR}/torch_op
-    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/torch_op/embed_binary.py
-        ${KERNEL_OUT_DIR}/fused_moe_flagship.o
-        ${KERNEL_BIN_CPP}
-        g_kernel
-    COMMENT "Embedding kernel binary into C++ (torch_op/kernel_bin.cpp)"
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/torch_op/embed_source.py
+        ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel/fused_moe_flagship.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel/fused_moe_tiling.h
+        ${KERNEL_SRC_CPP}
+    COMMENT "Embedding kernel source for RTC (torch_op/kernel_src.cpp)"
 )
 
 # ---- 3. 编译 shared library ----
 set(TORCH_OP_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/torch_op/fused_moe_flagship_op.cpp
-    ${KERNEL_BIN_CPP}
+    ${KERNEL_SRC_CPP}
 )
 
 add_library(fused_moe_flagship SHARED ${TORCH_OP_SRC})
@@ -215,12 +217,13 @@ target_link_libraries(fused_moe_flagship
     tiling_api               # PlatformAscendCManager (接口参考 6.2.2)
     platform                 # PlatformAscendC (tiling/platform/platform_ascendc.h)
     graph_base               # ge::Shape (dependency of tiling headers)
+    acl_rtc                  # RTC: aclrtcCreateProg, aclrtcCompileProg (PDF §2.3.1.5)
     -Wl,--as-needed          # 恢复默认行为
 )
 
 target_compile_features(fused_moe_flagship PUBLIC cxx_std_17)
 
-# Ensure kernel .o is built first
+# Optional: pre-compile kernel .o for build-time validation (RTC will re-compile at runtime)
 add_dependencies(fused_moe_flagship fused_moe_kernel)
 
 # Set RPATH so the .so can find its CANN dependencies

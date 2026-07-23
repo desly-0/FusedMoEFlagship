@@ -7,10 +7,11 @@
 // Architecture:
 //   1. Receive PyTorch tensors (NPU resident)
 //   2. Generate tiling data (using MultiCoreMatmulTiling)
-//   3. Embed kernel .o → load via ACL runtime (PDF §2.4.2)
+//   3. RTC compile kernel source → load via ACL runtime (PDF §2.3.1.5 + §2.4.2)
 //   4. Launch kernel, sync, return output tensor
 //
 // Kernel launch API (CANN 8.5.0):
+//   aclrtcCreateProg → aclrtcCompileProg → aclrtcGetBinData →
 //   aclrtBinaryLoadFromData → aclrtBinaryGetFunction →
 //   aclrtKernelArgsInit → aclrtKernelArgsAppend × N →
 //   aclrtKernelArgsFinalize → aclrtLaunchKernelWithConfig →
@@ -27,6 +28,7 @@
 // CANN ACL Runtime API (kernel loading & launch)
 #include "acl/acl.h"
 #include "acl/acl_rt.h"
+#include "acl/acl_rt_compile.h"   // RTC: aclrtcCreateProg, aclrtcCompileProg (PDF §2.3.1.5)
 
 // Tiling generation API
 #include "tiling/platform/platform_ascendc.h"
@@ -43,12 +45,9 @@
 #include <new>
 
 // ============================================================
-// Embedded kernel .o binary (generated at build time via embed_binary.py)
+// Embedded kernel source for RTC (generated at build time via embed_source.py)
 // ============================================================
-extern "C" {
-    extern const unsigned char g_kernelBinary[];
-    extern const size_t g_kernelBinarySize;
-}
+extern const char* g_kernelSource;
 
 // ============================================================
 // Tiling constants (matches op_host)
@@ -206,35 +205,43 @@ static torch::Tensor FusedMoEFlagshipForward(
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtMemcpy tiling data failed: ", ret);
 
     // ============================================================
-    // Kernel loading & launch (PDF §2.4.2)
+    // Kernel loading & launch (PDF §2.3.1.5 RTC + §2.4.2 launch)
     // ============================================================
 
-    // --- Step 1: Load kernel binary (.o) ---
-    //   aclrtBinaryLoadFromData(bin, size, nullptr, &binHandle)
-    //   PDF 开发指南 §2.4.2 / page 93: 预编译 .o 文件加载方式
-    //   loadOptions=nullptr → runtime 自动检测 kernel type (MIX / AIC / AIV)
-    //   注意: 示例中 aclrtBinaryLoadFromData 加载的是 aclrtcGetBinData 的输出,
-    //         但 PDF p.93 说明预编译 .o 也可直接通过此接口加载。
+    // --- Step 1: RTC Compile (PDF §2.3.1.5) ---
+    //   aclrtcCreateProg → aclrtcCompileProg → aclrtcGetBinData
+    aclrtcProg rtcProg = nullptr;
+    ret = aclrtcCreateProg(&rtcProg, g_kernelSource,
+                           "fused_moe_flagship", 0, nullptr, nullptr);
+    TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCreateProg failed: ", ret);
+
+    const char* compileOpts[] = {"--npu-arch=dav-2201", "-O2"};
+    ret = aclrtcCompileProg(rtcProg, 2, compileOpts);
+    TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCompileProg failed: ", ret);
+
+    size_t binSize = 0;
+    ret = aclrtcGetBinDataSize(rtcProg, &binSize);
+    TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcGetBinDataSize failed: ", ret);
+
+    std::vector<char> binData(binSize);
+    ret = aclrtcGetBinData(rtcProg, binData.data());
+    TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcGetBinData failed: ", ret);
+
+    // --- Step 2: Load compiled binary (PDF §2.4.2) ---
     aclrtBinHandle binHandle = nullptr;
     ret = aclrtBinaryLoadFromData(
-        reinterpret_cast<const void*>(g_kernelBinary),
-        g_kernelBinarySize, nullptr, &binHandle);
+        reinterpret_cast<const void*>(binData.data()),
+        binSize, nullptr, &binHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryLoadFromData failed: ", ret);
 
-    // --- Step 2: Get function handle ---
-    //   aclrtBinaryGetFunction(binHandle, "kernel_func_name", &funcHandle)
-    //   Kernel entry name matches extern "C" function name
-    //   若返回 107000 (ACL_ERROR_INVALID_PARAM), 可能因 MIX kernel 需特定加载方式
+    // --- Step 3: Get function handle ---
     aclrtFuncHandle funcHandle = nullptr;
     ret = aclrtBinaryGetFunction(binHandle, "fused_moe_flagship", &funcHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryGetFunction failed: ", ret);
 
-    // --- Step 3: Build kernel argument list ---
+    // --- Step 4: Build kernel argument list ---
     //   aclrtKernelArgsInit → aclrtKernelArgsAppend × N → aclrtKernelArgsFinalize
     //   PDF §2.4.2 Step 2: 获取核函数句柄并根据核函数句柄操作其参数列表
-    //
-    //   For GM_ADDR (pointer) args: append sizeof(uintptr_t) bytes
-    //   containing the device address.
     aclrtArgsHandle argsHandle = nullptr;
     ret = aclrtKernelArgsInit(funcHandle, &argsHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtKernelArgsInit failed: ", ret);
@@ -263,7 +270,7 @@ static torch::Tensor FusedMoEFlagshipForward(
     ret = aclrtKernelArgsFinalize(argsHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtKernelArgsFinalize failed: ", ret);
 
-    // --- Step 4: Launch kernel ---
+    // --- Step 5: Launch kernel ---
     //   aclrtLaunchKernelWithConfig(funcHandle, blockDim, stream, prop, args, reserved)
     //   PDF §2.4.2 Step 3: 调用aclrtLaunchKernelWithConfig启动算子计算任务
     ret = aclrtLaunchKernelWithConfig(
@@ -271,12 +278,12 @@ static torch::Tensor FusedMoEFlagshipForward(
         stream, nullptr, argsHandle, nullptr);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtLaunchKernelWithConfig failed: ", ret);
 
-    // --- Step 5: Wait for completion ---
+    // --- Step 6: Wait for completion ---
     ret = aclrtSynchronizeStream(stream);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtSynchronizeStream failed: ", ret);
 
     // --- Cleanup ---
-    // 接口参考 §2.4.2 示例代码: 使用 aclrtBinaryUnLoad 释放二进制句柄
+    aclrtcDestroyProg(&rtcProg);
     aclrtDestroyStream(stream);
     aclrtBinaryUnLoad(binHandle);
     aclrtFree(ws_gm);

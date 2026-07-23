@@ -9,9 +9,9 @@ python3 -c "
 import torch, os, ctypes
 os.environ['FUSED_MOE_FLAGSHIP_LIB'] = '/workspace/FusedMoEFlagship/build/libfused_moe_flagship.so'
 
-# Pre-load CANN 依赖 (确保 MultiCoreMatmulTiling vtable 可解析)
+# Pre-load CANN 依赖 (确保 MultiCoreMatmulTiling vtable + RTC 符号可解析)
 ASCEND_HOME = os.environ.get('ASCEND_TOOLKIT_HOME', '/usr/local/Ascend/cann-8.5.0')
-for lib in ['libregister.so', 'libtiling_api.so', 'libplatform.so', 'libgraph_base.so']:
+for lib in ['libregister.so', 'libtiling_api.so', 'libplatform.so', 'libgraph_base.so', 'libacl_rtc.so']:
     path = f'{ASCEND_HOME}/lib64/{lib}'
     if os.path.exists(path):
         ctypes.CDLL(path, ctypes.RTLD_GLOBAL)
