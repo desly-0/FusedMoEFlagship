@@ -154,6 +154,23 @@ else()
     message(FATAL_ERROR "PyTorch not found. Install PyTorch first.")
 endif()
 
+# ---- 1b. 查找 Python 开发头文件 (Python.h) ----
+# torch/extension.h -> python_headers.h -> Python.h
+find_package(Python3 COMPONENTS Development QUIET)
+if(NOT Python3_FOUND)
+    # fallback: 常见自定义安装路径
+    set(_PY_INC "/usr/local/python3.11.14/include/python3.11")
+    if(EXISTS "${_PY_INC}/Python.h")
+        set(Python3_INCLUDE_DIRS "${_PY_INC}")
+        set(Python3_FOUND TRUE)
+        message(STATUS "Python3 dev headers (manual): ${Python3_INCLUDE_DIRS}")
+    endif()
+endif()
+if(NOT Python3_FOUND)
+    message(WARNING "Python.h not found. "
+        "If compilation fails, set -DPython3_INCLUDE_DIRS=<path-to-Python.h>")
+endif()
+
 # ---- 2. 嵌入 kernel .o → C++ 源文件 ----
 set(KERNEL_BIN_CPP ${CMAKE_CURRENT_BINARY_DIR}/torch_op/kernel_bin.cpp)
 
@@ -182,6 +199,7 @@ target_include_directories(fused_moe_flagship PRIVATE
     ${ASCEND_TOOLKIT_HOME}/include           # acl/acl.h, tiling/...
     ${ASCEND_TOOLKIT_HOME}/aarch64-linux/asc/include  # adv_api/matmul/...
     ${TORCH_INCLUDE_DIRS}                    # torch/extension.h, ...
+    ${Python3_INCLUDE_DIRS}                  # Python.h
 )
 
 target_link_directories(fused_moe_flagship PRIVATE
