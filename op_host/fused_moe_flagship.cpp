@@ -18,16 +18,16 @@
 #include "register/op_def.h"
 #include "register/op_def_registry.h"
 
-// Matmul Tiling API (接口参考 5.2.2)
-#include "adv_api/matmul/matmul_tiling.h"
+// Matmul 多核 Tiling API (接口参考 5.2.2, p.1187)
+// 单核: #include "lib/matmul/matmul_tiling.h"
+// 多核: #include "lib/matmul/bmm_tiling.h"
+#include "lib/matmul/bmm_tiling.h"
 
 // 平台信息 API (接口参考 6.2.1 PlatformAscendC)
 #include "tiling/platform/platform_ascendc.h"
 
 // TilingData 结构体 (Kernel 与 Host 共享)
 #include "fused_moe_tiling.h"
-
-using namespace AscendC;
 
 // ========== 分块常量 (910B: L1=256KB, UB=256KB) ==========
 namespace {
@@ -49,10 +49,10 @@ static bool GenerateMatmulTiling(
 {
     tilingObj.SetDim(1);  // 单核执行每路 MatMul
 
-    // 矩阵类型配置: A/B/C 均为 GM, ND, FP16
-    tilingObj.SetAType(TPosition::GM, CubeFormat::ND, DataType::DT_FLOAT16, false);
-    tilingObj.SetBType(TPosition::GM, CubeFormat::ND, DataType::DT_FLOAT16, transB);
-    tilingObj.SetCType(TPosition::GM, CubeFormat::ND, DataType::DT_FLOAT16);
+    // 矩阵类型配置: A/B/C 均为 GM, ND, FP16 (接口参考 p.1184-1187)
+    tilingObj.SetAType(matmul_tiling::TPosition::GM, matmul_tiling::CubeFormat::ND, matmul_tiling::DataType::DT_FLOAT16, false);
+    tilingObj.SetBType(matmul_tiling::TPosition::GM, matmul_tiling::CubeFormat::ND, matmul_tiling::DataType::DT_FLOAT16, transB);
+    tilingObj.SetCType(matmul_tiling::TPosition::GM, matmul_tiling::CubeFormat::ND, matmul_tiling::DataType::DT_FLOAT16);
 
     // 形状配置
     tilingObj.SetShape(m, n, k);
