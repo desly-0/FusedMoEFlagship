@@ -275,8 +275,10 @@ extern "C" __global__ __aicore__ void fused_moe_flagship(
     // 也会因 TCubeTiling 的非平凡构造函数而失败)
     FusedMoeTilingData tilingData;
     __builtin_memcpy(&tilingData, tiling, sizeof(FusedMoeTilingData));
-    // 使用默认 Kernel 类型（自动检测），AIC 和 AIV 核均可执行全部计算
-    // 避免 MIX 模式需 ASCEND_IS_AIC/AIV 隔离 + ASCENDC_CUBE_ONLY (CV 融合 §3.3.5.1)
+    // 使用默认 Kernel 类型（RTC 编译器自动生成 AI Core 代码, 无需显式声明）。
+    // KERNEL_TYPE_AICORE 在 CANN 8.5.0 中为"预留参数暂不支持", 不可使用。
+    // Kernel 类型由 host 侧 aclrtBinaryLoadFromData 的 loadOptions magic 值
+    // (ACL_RT_BINARY_MAGIC_ELF_AI_CORE) 告知运行时, 见 op 侧代码。
 
     // 设置系统 workspace (PDF §4.4.2.1.2 + §3.3.5.1)
     // RTC 直调工程非工程化算子、无 HAVE_WORKSPACE 编译宏，必须手动调用

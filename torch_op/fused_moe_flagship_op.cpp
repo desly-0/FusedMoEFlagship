@@ -249,10 +249,20 @@ static torch::Tensor FusedMoEFlagshipForward(
     }
 
     // --- Step 2: Load compiled binary (PDF §2.4.2) ---
+    // RTC 示例 (PDF §2.3.1.5 p86-87) 使用 ACL_RT_BINARY_LOAD_OPT_MAGIC
+    // 指定 kernel 类型。Vector-only kernel 用 VECTOR_CORE, 我们含
+    // Cube+Vector 的 kernel 需要 AI_CORE magic, 否则运行时默认为
+    // Vector Core → Cube 指令无法执行 → FixPipe 挂死 → 507014 timeout。
     aclrtBinHandle binHandle = nullptr;
+    aclrtBinaryLoadOption loadOpt;
+    loadOpt.type = ACL_RT_BINARY_LOAD_OPT_MAGIC;
+    loadOpt.value.magic = ACL_RT_BINARY_MAGIC_ELF_AI_CORE;
+    aclrtBinaryLoadOptions loadOpts;
+    loadOpts.numOpt = 1;
+    loadOpts.options = &loadOpt;
     ret = aclrtBinaryLoadFromData(
         reinterpret_cast<const void*>(binData.data()),
-        binSize, nullptr, &binHandle);
+        binSize, &loadOpts, &binHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryLoadFromData failed: ", ret);
 
     // --- Step 3: Get function handle ---

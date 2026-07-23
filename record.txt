@@ -16,6 +16,32 @@ git commit -m "Fix: remove MIX kernel type to fix AI Core MPU access error (5070
 # 根因: KERNEL_TYPE_MIX_AIC_1_2 但无 ASCEND_IS_AIC/AIV 隔离，AIV 核执行 MatMul 指令
 # 修复: 移除 MIX 类型声明，运行时自动检测核类型
 
+# --- Commit 3: 添加 SetSysWorkspace 修复 507015 (PDF §4.4.2.1.2) ---
+git add op_kernel/fused_moe_flagship.cpp torch_op/fused_moe_flagship_op.cpp record.txt
+git commit -m "Fix: add SetSysWorkspace to resolve AI Core MPU error 507015"
+# 已推送: 2026-07-23, dd085af
+# 根因: RTC 直调工程未设置系统 workspace, GetSysWorkSpacePtr() 返回 nullptr,
+#       Matmul 高阶 API (REGIST_MATMUL_OBJ) 写入空指针 → MPU 访问越界
+# 修复 (PDF §4.4.2.1.2 + §3.3.5.1):
+#   kernel 入口: SetSysWorkspace(workspace) before Init()
+#   host 侧: GetLibApiWorkSpaceSize() 获取系统 workspace 大小, 加入总分配
+# 当前状态: RTC 编译成功, 但 kernel 执行挂起 (NPU 无响应)
+#   已修复: ① SetSysWorkspace (PDF §4.4.2.1.2) - 已添加
+#   已修复: ② aclrtBinaryLoadFromData magic 值 - 已添加 ACL_RT_BINARY_MAGIC_ELF_AI_CORE
+#   待验证: 编译部署后测试
+
+# --- Commit 4: 修复 aclrtBinaryLoadOptions 缺少 AI Core magic 值 ---
+git add torch_op/fused_moe_flagship_op.cpp op_kernel/fused_moe_flagship.cpp record.txt
+git commit -m "Fix: add ACL_RT_BINARY_MAGIC_ELF_AI_CORE to resolve 507014 timeout"
+# 未推送
+# 根因: aclrtBinaryLoadFromData(..., nullptr, ...) 不指定 magic 值时,
+#       运行时默认按 Vector Core 加载含 Cube 指令的 kernel → FixPipe 挂死
+# 修复:
+#   op 侧: aclrtBinaryLoadOptions{ type=ACL_RT_BINARY_LOAD_OPT_MAGIC,
+#          value.magic=ACL_RT_BINARY_MAGIC_ELF_AI_CORE } 告知运行时加载到 AI Core
+#   kernel 侧: 更新注释, KERNEL_TYPE_AICORE 为预留参数不可用,
+#             编译器默认生成 AI Core 代码, 无需显式声明
+
 # ==================== 一键部署（Gitee） ====================
 cd /workspace && rm -rf FusedMoEFlagship FusedMoEFlagship.zip && wget https://gitee.com/zhao-xiaowei10086/FusedMoEFlagship/repository/archive/main.zip -O FusedMoEFlagship.zip && python3 -c "import zipfile; zipfile.ZipFile('FusedMoEFlagship.zip', 'r').extractall('.')" && mv FusedMoEFlagship-main FusedMoEFlagship && rm FusedMoEFlagship.zip && cd FusedMoEFlagship && rm -rf build && mkdir build && cd build && cmake .. -DASCEND_TOOLKIT_HOME=$ASCEND_TOOLKIT_HOME && make -j$(nproc) 2>&1
 
