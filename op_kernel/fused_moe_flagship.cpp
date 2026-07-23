@@ -81,14 +81,17 @@ public:
         // ==== 注册 Matmul 对象 (必须在 pipe.InitBuffer 之前) ====
         // API 约束: 分离模式中 REGIST_MATMUL_OBJ 必须在 InitBuffer 前调用
         // 详见: 5.2.1.14 REGIST_MATMUL_OBJ, 5.2.1.15 Init
+        // API 约束: REGIST_MATMUL_OBJ 只能注册一个 Matmul 对象 (接口参考 5.2.1)
+        // 两个 Matmul 对象需要两次独立注册
+        // 传 &tiling 时 REGIST_MATMUL_OBJ 内部会调用 Init，不需要额外 mm.Init()
         TCubeTiling* cubeTilingMM1 =
             reinterpret_cast<TCubeTiling*>(&(tiling_.cubeTilingMM1));
         TCubeTiling* cubeTilingMM2 =
             reinterpret_cast<TCubeTiling*>(&(tiling_.cubeTilingMM2));
         REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(),
-                          mm1_, cubeTilingMM1,
+                          mm1_, cubeTilingMM1);
+        REGIST_MATMUL_OBJ(&pipe, GetSysWorkSpacePtr(),
                           mm2_, cubeTilingMM2);
-        // 不再需要 mm.Init() — REGIST_MATMUL_OBJ 已内部调用
 
         // 分配 Local Memory (UB) 缓冲区 (P0+P3+P4 优化后布局)
         //   mergeBuf:      tileM × interDim × sizeof(T)   (合并 DataCopy: gate_up 整体 → 视图切片)
@@ -195,7 +198,7 @@ public:
                         weightBCastBuf_.Get<T>(curTileM * tileN);
                     uint32_t bDstShape[2] = {curTileM, tileN};
                     uint32_t bSrcShape[2] = {curTileM, 1};
-                    Broadcast<half, 2, 1>(weightBCast, weightT,
+                    Broadcast<T, 2, 1>(weightBCast, weightT,
                                           bDstShape, bSrcShape);
 
                     Mul(gateView, gateView, weightBCast, curTileM * tileN);
