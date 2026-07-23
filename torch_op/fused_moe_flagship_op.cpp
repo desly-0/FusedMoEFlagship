@@ -210,27 +210,21 @@ static torch::Tensor FusedMoEFlagshipForward(
     // ============================================================
 
     // --- Step 1: Load kernel binary (.o) ---
-    //   aclrtBinaryLoadFromData(bin, size, &loadOpt, &binHandle)
-    //   PDF §2.4.2 Step 1: 通过aclrtBinaryLoadFromData解析二进制数据
-    //   接口参考 §2.4.2 示例代码: 类型为 aclrtBinHandle (非 aclrtBinaryHandle)
+    //   aclrtBinaryLoadFromData(bin, size, nullptr, &binHandle)
+    //   PDF 开发指南 §2.4.2 / page 93: 预编译 .o 文件加载方式
+    //   loadOptions=nullptr → runtime 自动检测 kernel type (MIX / AIC / AIV)
+    //   注意: 示例中 aclrtBinaryLoadFromData 加载的是 aclrtcGetBinData 的输出,
+    //         但 PDF p.93 说明预编译 .o 也可直接通过此接口加载。
     aclrtBinHandle binHandle = nullptr;
-    aclrtBinaryLoadOptions loadOption{};
-    aclrtBinaryLoadOption option{};
-    option.type = ACL_RT_BINARY_LOAD_OPT_LAZY_MAGIC;
-    // MIX kernel (KERNEL_TYPE_MIX_AIC_1_2): contains both AIC & AIV sections.
-    // The runtime detects core type from binary metadata.
-    option.value.magic = ACL_RT_BINARY_MAGIC_ELF_AICORE;
-    loadOption.numOpt = 1;
-    loadOption.options = &option;
-
     ret = aclrtBinaryLoadFromData(
         reinterpret_cast<const void*>(g_kernelBinary),
-        g_kernelBinarySize, &loadOption, &binHandle);
+        g_kernelBinarySize, nullptr, &binHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryLoadFromData failed: ", ret);
 
     // --- Step 2: Get function handle ---
     //   aclrtBinaryGetFunction(binHandle, "kernel_func_name", &funcHandle)
     //   Kernel entry name matches extern "C" function name
+    //   若返回 107000 (ACL_ERROR_INVALID_PARAM), 可能因 MIX kernel 需特定加载方式
     aclrtFuncHandle funcHandle = nullptr;
     ret = aclrtBinaryGetFunction(binHandle, "fused_moe_flagship", &funcHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryGetFunction failed: ", ret);
