@@ -94,9 +94,16 @@ set(HOST_LINK_DIRS
 add_library(fused_moe_flagship_host SHARED ${HOST_SRC})
 target_include_directories(fused_moe_flagship_host PRIVATE ${HOST_INCLUDE_DIRS})
 target_link_directories(fused_moe_flagship_host PRIVATE ${HOST_LINK_DIRS})
+# CANN 8.5.0 开发指南 表2-5/2-6:
+# - ascendc/ascendeclib 在 CANN 8.5.0 中不存在（已移除）
+# - AscendC 运行时由 ge_compiler 提供
+# - 使用高阶 API (bmm_tiling PlatformAscendC) 需链接 register/platform/graph_base
 target_link_libraries(fused_moe_flagship_host
     ge_compiler
     runtime
+    register        # 表2-5: Tiling注册 (OpDef/OP_ADD)
+    graph_base      # 表2-5: ge::Shape, ge::DataType
+    platform        # 表2-5: PlatformAscendC
 )
 
 # 设置 C++ 标准
