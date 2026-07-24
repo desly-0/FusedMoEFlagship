@@ -14,6 +14,7 @@
 // ============================================================
 
 #include "kernel_operator.h"
+#define ASCENDC_CUBE_ONLY  // 纯Cube模式: Matmul仅在AIC侧执行, PDF §2.4.1 + §3.3.5
 #include "lib/matmul_intf.h"
 #include "fused_moe_tiling.h"
 
