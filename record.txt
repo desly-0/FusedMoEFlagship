@@ -202,19 +202,29 @@ print('Flagship custom op OK!')
 #   → 改 target_compile_options + $<COMPILE_LANGUAGE:ASC>  (PDF p471)
 # 当前状态: 待测试
 
-# ==================== Commit 7: ASCENDC_CUBE_ONLY 修复 kernel 挂死 507014 ====================
+# ==================== Commit 7: ASCENDC_CUBE_ONLY + KERNEL_TYPE_AIC_ONLY ====================
 # git add op_kernel/fused_moe_flagship.cpp record.txt
-# git commit -m "Fix: add ASCENDC_CUBE_ONLY to resolve kernel hang (507014 timeout)"
-# 根因: REGIST_MATMUL_OBJ 默认生成 MIX 模式代码 (AIC + AIV 双路径),
-#       但 host 侧以 ACL_RT_BINARY_MAGIC_ELF_AICORE 仅加载 AI Core 镜像,
-#       AIV 侧消息初始化挂死 → FixPipe 超时 → 507014
-# 修复 (PDF §2.4.1 + §3.3.5, 接口参考 §ASCENDC_CUBE_ONLY):
-#   op_kernel/fused_moe_flagship.cpp: #define ASCENDC_CUBE_ONLY before
-#   #include "lib/matmul_intf.h", 强制 Matmul 仅运行在 AIC (纯 Cube 模式)
-# 参考: CV融合 §3.3.5: "使用高阶API Matmul时需要设置ASCENDC_CUBE_ONLY,
-#       表示仅在AIC侧调用Matmul API"
-#       接口参考: "ASCENDC_CUBE_ONLY必须在#include lib/matmul_intf.h之前设置"
-# 当前状态: 已推送 GitHub, 待 Gitee 同步后部署测试
+# git commit -m "Fix: add ASCENDC_CUBE_ONLY + KERNEL_TYPE_AIC_ONLY for pure Cube mode"
+# 已推送: 2026-07-24, b6f8268
+# 已推送: 2026-07-24, (latest)
+# 问题1: 无 ASCENDC_CUBE_ONLY 时 REGIST_MATMUL_OBJ 生成 MIX 代码
+#        (AIC+AIV 双路径), 但 host 以 AI_CORE magic 只加载 AI Core 镜像,
+#        AIV 侧初始化挂死 → 507014 timeout
+# 修复1 (PDF 接口参考 §ASCENDC_CUBE_ONLY + §3.3.5 CV融合):
+#   #define ASCENDC_CUBE_ONLY before #include "lib/matmul_intf.h"
+#   → 强制 Matmul 仅在 AIC 侧纯 Cube 模式执行 (二进制 85152→76960 bytes ✓)
+# 问题2: 只加 ASCENDC_CUBE_ONLY 时, fatbin 元数据仍为 MIX 类型,
+#        运行时会尝试在 AIV 核 (core 39) 上执行 AIV 初始化代码,
+#        核内无对应 AIV 镜像 → aivector MPU 越界 → 507015
+# 修复2 (PDF 接口参考 §KernelMetaType p49555 + p63528):
+#   KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY) 在入口函数中
+#   → fatbin 元数据标记为 AIC_ONLY, 运行时不再启AIV核
+# 参考: 接口参考 p49555 enum KernelMetaType { KERNEL_TYPE_AIC_ONLY, ... }
+#                    p49584 KERNEL_TYPE_AIC_ONLY = AI Core Cube 模式
+#                    p63528 纯Cube Matmul示例: ASCENDC_CUBE_ONLY +
+#                           KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY)
+#       开发指南 p94550 同示例: KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_AIC_ONLY)
+# 当前状态: 待部署测试
 
 # ==================== 一键部署 + 测试（从 Gitee 拉取）====================
 cd /workspace && rm -rf FusedMoEFlagship FusedMoEFlagship.zip && wget https://gitee.com/zhao-xiaowei10086/FusedMoEFlagship/repository/archive/main.zip -O FusedMoEFlagship.zip && python3 -c "import zipfile; zipfile.ZipFile('FusedMoEFlagship.zip', 'r').extractall('.')" && mv FusedMoEFlagship-main FusedMoEFlagship && rm FusedMoEFlagship.zip && cd FusedMoEFlagship && rm -rf build && mkdir build && cd build && cmake .. -DASCEND_TOOLKIT_HOME=$ASCEND_TOOLKIT_HOME && make -j$(nproc) 2>&1 && echo "=== Build OK ===" && export FUSED_MOE_FLAGSHIP_LIB=/workspace/FusedMoEFlagship/build/libfused_moe_flagship.so && python3 -c "
