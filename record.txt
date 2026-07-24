@@ -194,4 +194,10 @@ print('Flagship custom op OK!')
 #       ascendc_fatbin_library 产生 fatbin .o 含 kernel 入口元数据,
 #       使 aclrtBinaryGetFunction 能找到函数名
 #   - torch_op/fused_moe_flagship_op.cpp: 恢复 unmangled 函数名
-# 当前状态: 待测试 fatbin .o 能否使 aclrtBinaryGetFunction 成功
+#
+# NOTE: ascendc_fatbin_library 创建 OBJECT 库, POST_BUILD 不支持
+#   → 改 add_custom_target 做拷贝 (Commit a8d5e22)
+#
+# NOTE: ascendc_compile_options 传参格式导致 bisheng 报错
+#   → 改 target_compile_options + $<COMPILE_LANGUAGE:ASC>  (PDF p471)
+# 当前状态: 待测试
