@@ -228,6 +228,13 @@ class WorkerFL(WorkerBase):
 
         register_oot_ops()
 
+        # Eagerly initialize OpManager before graph compilation.
+        # This ensures that during TorchDynamo compiled execution,
+        # ensure_initialized() hits the fast path (PID check before RLock)
+        # and Dynamo never encounters the unsupported RLock context manager.
+        from vllm_fl.dispatch.manager import get_default_manager
+        get_default_manager().ensure_initialized()
+
         if fl_envs.USE_FLAGGEMS:
             import flag_gems
 

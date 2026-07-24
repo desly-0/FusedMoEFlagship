@@ -196,11 +196,25 @@ class OpManager:
         Performs:
         1. PID check (multi-process safety)
         2. Register built-in operator implementations
-        """
-        with self._lock:
-            pid = os.getpid()
 
-            # Check if already initialized in this process
+        NOTE: The PID/initialized check MUST happen before acquiring self._lock
+        (the RLock). This allows TorchDynamo to trace through this function during
+        graph compilation without encountering the unsupported RLock context
+        manager — as long as the Manager is already initialized before compilation
+        starts (see worker.py __init__ for the eager init call). After init, every
+        subsequent call hits this fast path and Dynamo never sees the RLock.
+        """
+        pid = os.getpid()
+
+        # Fast path: already initialized in this process (no lock needed).
+        # This MUST be before the RLock to avoid Dynamo tracing the lock.
+        if self._state.initialized and self._state.init_pid == pid:
+            return
+
+        # Slow path: need to initialize (with lock for thread safety).
+        with self._lock:
+            # Double-check after acquiring lock
+            pid = os.getpid()
             if self._state.initialized and self._state.init_pid == pid:
                 return
 
