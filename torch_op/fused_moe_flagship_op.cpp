@@ -295,8 +295,11 @@ static torch::Tensor FusedMoEFlagshipForward(
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryLoadFromData failed: ", ret);
 
     // --- Step 3: Get function handle ---
+    // bisheng 编译的 .o 中 extern "C" 被忽略, 符号被 C++ mangle 为
+    // _Z18fused_moe_flagshipjPvS_PhS...
+    // REGIST_MATMUL_OBJ 生成 MIX 变体 (AIC+AIV), 用 AIC 变体名
     aclrtFuncHandle funcHandle = nullptr;
-    ret = aclrtBinaryGetFunction(binHandle, "fused_moe_flagship", &funcHandle);
+    ret = aclrtBinaryGetFunction(binHandle, "fused_moe_flagship_mix_aic", &funcHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryGetFunction failed: ", ret);
 
     // --- Step 4: Build kernel argument list ---
