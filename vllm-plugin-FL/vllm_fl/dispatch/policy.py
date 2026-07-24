@@ -10,6 +10,8 @@ import contextvars
 import logging
 import os
 import threading
+
+import torch
 import yaml
 from dataclasses import dataclass, field
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
@@ -187,6 +189,7 @@ class PolicyManager:
             self._policy_epoch += 1
             return self._policy_epoch
 
+    @torch._dynamo.disable
     def get_policy(self) -> SelectionPolicy:
         """Get the current effective policy (context or global)."""
         ctx_policy = self._policy_var.get()
