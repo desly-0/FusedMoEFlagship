@@ -83,18 +83,16 @@ ascendc_include_directories(fused_moe_flagship_kernel PRIVATE
 # Copy fatbin .o 到已知位置供 torch_op 运行时加载
 set(KERNEL_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/op_kernel)
 set(FATBIN_O_PATH "${CMAKE_INSTALL_PREFIX}/fatbin/fused_moe_flagship_kernel/fused_moe_flagship_kernel.o")
-add_custom_command(TARGET fused_moe_flagship_kernel POST_BUILD
+
+# 旧 kernel add_custom_target 被 ascendc_fatbin_library 替代,
+# 用 fused_moe_kernel 做 post-build 拷贝
+add_custom_target(fused_moe_kernel ALL
+    DEPENDS fused_moe_flagship_kernel
     COMMAND ${CMAKE_COMMAND} -E make_directory ${KERNEL_OUT_DIR}
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${FATBIN_O_PATH}"
         "${KERNEL_OUT_DIR}/fused_moe_flagship.o"
     COMMENT "Copy fatbin kernel to ${KERNEL_OUT_DIR}/fused_moe_flagship.o"
-)
-
-# 旧 kernel add_custom_target 被 ascendc_fatbin_library 替代,
-# 保留 fused_moe_kernel 别名避免下游依赖失效 (fused_moe_package)
-add_custom_target(fused_moe_kernel ALL
-    DEPENDS fused_moe_flagship_kernel
 )
 
 # ========== Host 编译 (.so) ==========
