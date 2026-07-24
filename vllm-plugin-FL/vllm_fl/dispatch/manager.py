@@ -104,7 +104,11 @@ class OpManager:
         self._called_ops: Dict[str, str] = {}  # Map op_name -> last_used_impl_id
         self._failed_impls: Dict[str, Set[str]] = {}  # Map op_name -> set of failed impl_ids
 
-        # Register at_fork handler for multi-process safety
+        # Cache policy at init to avoid ContextVar.get() during
+        # TorchDynamo graph compilation (model forward in graph mode).
+        # The policy determines op selection ordering and strict/fallback mode.
+        self._cached_policy = get_policy()
+        self._enable_fallback = not self._cached_policy.strict
         try:
             os.register_at_fork(after_in_child=self._reset_after_fork)
         except AttributeError:
@@ -131,6 +135,9 @@ class OpManager:
             self._candidates_cache.clear()
             self._called_ops.clear()
             self._failed_impls.clear()
+            # Re-read policy in child process (ContextVar is fork-safe)
+            self._cached_policy = get_policy()
+            self._enable_fallback = not self._cached_policy.strict
             logger.debug("OpManager reset after fork")
 
     def bump_policy_epoch(self) -> None:
@@ -318,7 +325,7 @@ class OpManager:
         """Resolve and cache the best implementation for an operator."""
         self.ensure_initialized()
 
-        policy = get_policy()
+        policy = self._cached_policy
         epoch = self._state.policy_epoch
 
         cache_key = (op_name, policy, epoch)
@@ -430,7 +437,7 @@ class OpManager:
         """
         self.ensure_initialized()
 
-        policy = get_policy()
+        policy = self._cached_policy
         epoch = self._state.policy_epoch
         cache_key = (op_name, policy, epoch)
         cached = self._candidates_cache.get(cache_key)
@@ -528,7 +535,7 @@ class OpManager:
             RuntimeError: If all implementations fail (fallback mode) or
                          if the primary implementation fails (strict mode)
         """
-        enable_fallback = not get_policy().strict
+        enable_fallback = self._enable_fallback
 
         if not enable_fallback:
             impl = self._resolve_impl(op_name)

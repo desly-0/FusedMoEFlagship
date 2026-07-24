@@ -189,7 +189,6 @@ class PolicyManager:
             self._policy_epoch += 1
             return self._policy_epoch
 
-    @torch._dynamo.disable
     def get_policy(self) -> SelectionPolicy:
         """Get the current effective policy (context or global)."""
         ctx_policy = self._policy_var.get()
