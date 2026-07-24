@@ -21,9 +21,22 @@
 # ============================================================
 
 cmake_minimum_required(VERSION 3.16)
-project(FusedMoEFlagship LANGUAGES CXX)
 
-# ========== CANN 工具链路径 ==========
+# ========== ASC CMake 框架 (提供 ascendc_fatbin_library 等宏) ==========
+# find_package(ASC) 在 CANN 安装中可用, 搜索 ${ASCEND_TOOLKIT_HOME}/cmake/
+# PDF §2.9.7 p292: ascendc_fatbin_library 编译 kernel 为 fatbin .o 格式
+# (含 .ascend.kernel 段), 供 aclrtBinaryLoadFromData + aclrtBinaryGetFunction 使用
+if(NOT DEFINED ASCEND_TOOLKIT_HOME)
+    set(ASCEND_TOOLKIT_HOME $ENV{ASCEND_TOOLKIT_HOME})
+endif()
+if(ASCEND_TOOLKIT_HOME)
+    list(APPEND CMAKE_PREFIX_PATH "${ASCEND_TOOLKIT_HOME}")
+endif()
+find_package(ASC REQUIRED)
+
+project(FusedMoEFlagship LANGUAGES ASC CXX)
+
+# ========== CANN 路径 ==========
 if(NOT DEFINED ASCEND_TOOLKIT_HOME)
     set(ASCEND_TOOLKIT_HOME $ENV{ASCEND_TOOLKIT_HOME})
 endif()
@@ -35,37 +48,53 @@ endif()
 
 message(STATUS "ASCEND_TOOLKIT_HOME: ${ASCEND_TOOLKIT_HOME}")
 
-# ========== Kernel 编译 (AI Core .o) ==========
-# 使用 bisheng (AscendC 编译器) 编译核函数
-# 注意: 需要 -x asc 标志以将 .cpp 识别为 Ascend C 源码 (而非 C++)
-#        --npu-arch=dav-2201 对应 Atlas A2 系列 (含 910B)
-#        参考 CANN 算子开发指南 2.3.1.2 bisheng 命令行
+# Set install prefix to a knowable build-dir path for ascendc_fatbin_library
+set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/asc_install")
+
+# ========== Kernel 编译 (fatbin .o for aclrtBinaryLoadFromData) ==========
+# ascendc_fatbin_library 编译 kernel 源文件为 fatbin .o,
+# 输出至 ${CMAKE_INSTALL_PREFIX}/fatbin/${target_name}/${target_name}.o
+# fatbin 包含 .ascend.kernel 段, aclrtBinaryGetFunction 可从中找到函数入口。
+# PDF p292: ascendc_fatbin_library 语法说明
 
 set(KERNEL_SRC
     ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel/fused_moe_flagship.cpp
 )
 
-set(KERNEL_OUT_DIR
-    ${CMAKE_CURRENT_BINARY_DIR}/op_kernel
+# 标记 .cpp 为 ASC 语言 (bisheng 编译)
+set_source_files_properties(
+    ${KERNEL_SRC}
+    PROPERTIES LANGUAGE ASC
 )
 
-add_custom_command(
-    OUTPUT ${KERNEL_OUT_DIR}/fused_moe_flagship.o
-    DEPENDS ${KERNEL_SRC}
+ascendc_fatbin_library(fused_moe_flagship_kernel
+    ${KERNEL_SRC}
+)
+
+ascendc_compile_options(fused_moe_flagship_kernel PRIVATE
+    --npu-arch=dav-2201 -O2
+)
+
+ascendc_include_directories(fused_moe_flagship_kernel PRIVATE
+    ${ASCEND_TOOLKIT_HOME}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel
+)
+
+# Copy fatbin .o 到已知位置供 torch_op 运行时加载
+set(KERNEL_OUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/op_kernel)
+set(FATBIN_O_PATH "${CMAKE_INSTALL_PREFIX}/fatbin/fused_moe_flagship_kernel/fused_moe_flagship_kernel.o")
+add_custom_command(TARGET fused_moe_flagship_kernel POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory ${KERNEL_OUT_DIR}
-    COMMAND ${ASCEND_TOOLKIT_HOME}/tools/bisheng_compiler/bin/bisheng
-        -x asc
-        --npu-arch=dav-2201
-        -O2
-        -I ${ASCEND_TOOLKIT_HOME}/include
-        -I ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel
-        -c ${KERNEL_SRC}
-        -o ${KERNEL_OUT_DIR}/fused_moe_flagship.o
-    COMMENT "Compiling AscendC kernel (fused_moe_flagship.o)"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${FATBIN_O_PATH}"
+        "${KERNEL_OUT_DIR}/fused_moe_flagship.o"
+    COMMENT "Copy fatbin kernel to ${KERNEL_OUT_DIR}/fused_moe_flagship.o"
 )
 
+# 旧 kernel add_custom_target 被 ascendc_fatbin_library 替代,
+# 保留 fused_moe_kernel 别名避免下游依赖失效 (fused_moe_package)
 add_custom_target(fused_moe_kernel ALL
-    DEPENDS ${KERNEL_OUT_DIR}/fused_moe_flagship.o
+    DEPENDS fused_moe_flagship_kernel
 )
 
 # ========== Host 编译 (.so) ==========

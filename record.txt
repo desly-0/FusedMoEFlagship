@@ -181,3 +181,17 @@ print('Output shape:', output.shape)
 print('Output sample:', output[0, :8])
 print('Flagship custom op OK!')
 "
+
+# ==================== Commit 6: ASC CMake 框架 + ascendc_fatbin_library ====================
+# git add CMakeLists.txt torch_op/fused_moe_flagship_op.cpp record.txt
+# git commit -m "Fix: migrate to ASC CMake framework for fatbin kernel format"
+# 已推送: 2026-07-24
+# 修改:
+#   - CMakeLists.txt:
+#     +find_package(ASC REQUIRED) + project(LANGUAGES ASC CXX)  (PDF §2.9.7 p292)
+#     +ascendc_fatbin_library() 替代 add_custom_command(bisheng -c)  (PDF p292)
+#       bisheng -c 产生普通 ELF .o 无 .ascend.kernel 段,
+#       ascendc_fatbin_library 产生 fatbin .o 含 kernel 入口元数据,
+#       使 aclrtBinaryGetFunction 能找到函数名
+#   - torch_op/fused_moe_flagship_op.cpp: 恢复 unmangled 函数名
+# 当前状态: 待测试 fatbin .o 能否使 aclrtBinaryGetFunction 成功

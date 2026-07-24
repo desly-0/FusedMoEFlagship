@@ -295,13 +295,10 @@ static torch::Tensor FusedMoEFlagshipForward(
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryLoadFromData failed: ", ret);
 
     // --- Step 3: Get function handle ---
-    // bisheng 编译的 .o 中符号被 C++ mangle（extern "C" 被忽略）:
-    //   _Z18fused_moe_flagshipjPvS_PhS0_S0_S0_S0_S0_S0_S0_S0_S0_
-    // 先试 mangled 名, 不行再试 unmangled
+    // fatbin .o (由 ascendc_fatbin_library 生成) 包含 .ascend.kernel 段,
+    // aclrtBinaryGetFunction 可找到 unmangled 函数名
     aclrtFuncHandle funcHandle = nullptr;
-    ret = aclrtBinaryGetFunction(binHandle,
-        "_Z18fused_moe_flagshipjPvS_PhS0_S0_S0_S0_S0_S0_S0_S0_S0_",
-        &funcHandle);
+    ret = aclrtBinaryGetFunction(binHandle, "fused_moe_flagship", &funcHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryGetFunction failed: ", ret);
 
     // --- Step 4: Build kernel argument list ---
