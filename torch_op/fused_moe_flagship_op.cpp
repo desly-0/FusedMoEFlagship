@@ -43,10 +43,13 @@
 #include <cstdint>
 #include <algorithm>
 #include <new>
+#include <fstream>
 
 // ============================================================
-// Embedded kernel source for RTC (generated at build time via embed_source.py)
+// Kernel binary loading: try pre-compiled .o first, fallback to RTC
 // ============================================================
+// Build-time bisheng produces op_kernel/fused_moe_flagship.o (CMakeLists.txt §2.3.1.3).
+// RTC (§2.3.1.5) used as fallback if .o not found.
 extern const char* g_kernelSource;
 
 // ============================================================
@@ -215,47 +218,70 @@ static torch::Tensor FusedMoEFlagshipForward(
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtMemcpy tiling data failed: ", ret);
 
     // ============================================================
-    // Kernel loading & launch (PDF §2.3.1.5 RTC + §2.4.2 launch)
+    // Kernel loading: pre-compiled .o (bisheng §2.3.1.3) → RTC fallback (§2.3.1.5)
     // ============================================================
+    // Prefer bisheng-compiled kernel .o over RTC. The .o is produced by
+    // CMake at build/op_kernel/fused_moe_flagship.o with -x asc flag.
+    // RTC compilation observed to produce IFU/CCU errors (invalid instructions)
+    // leading to 507014 aicore timeout; pre-compiled .o avoids this.
+    std::vector<char> binData;
+    {
+        // Search for kernel .o relative to the shared library or CWD
+        std::string oPaths[] = {
+            "op_kernel/fused_moe_flagship.o",
+            "./op_kernel/fused_moe_flagship.o",
+            "../op_kernel/fused_moe_flagship.o",
+        };
+        bool loaded = false;
+        for (const auto& path : oPaths) {
+            std::ifstream f(path, std::ios::binary | std::ios::ate);
+            if (!f) continue;
+            size_t sz = static_cast<size_t>(f.tellg());
+            f.seekg(0);
+            binData.resize(sz);
+            f.read(binData.data(), sz);
+            loaded = true;
+            std::cerr << "[Kernel] Loaded pre-compiled: " << path << " (" << sz << " bytes)" << std::endl;
+            break;
+        }
 
-    // --- Step 1: RTC Compile (PDF §2.3.1.5) ---
-    //   aclrtcCreateProg → aclrtcCompileProg → aclrtcGetBinData
-    aclrtcProg rtcProg = nullptr;
-    ret = aclrtcCreateProg(&rtcProg, g_kernelSource,
-                           "fused_moe_flagship", 0, nullptr, nullptr);
-    TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCreateProg failed: ", ret);
+        if (!loaded) {
+            // Fallback to RTC
+            std::cerr << "[Kernel] .o not found, falling back to RTC compile" << std::endl;
+            aclrtcProg rtcProg = nullptr;
+            ret = aclrtcCreateProg(&rtcProg, g_kernelSource,
+                                   "fused_moe_flagship", 0, nullptr, nullptr);
+            TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCreateProg failed: ", ret);
 
-    // bisheng 编译 kernel 时使用 -x asc 标志（CMakeLists.txt §2.3.1.3），
-    // RTC 编译 source 为字符串而非 .asc 文件，bisheng 无法自动检测语言类型，
-    // 不加 -x asc 会导致 REGIST_MATMUL_OBJ/MatMul 代码生成不正确 → FixPipe 挂死。
-    const char* compileOpts[] = {"--npu-arch=dav-2201", "-O2", "-x", "asc"};
-    ret = aclrtcCompileProg(rtcProg, 4, compileOpts);
-    TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCompileProg failed: ", ret);
+            const char* compileOpts[] = {"--npu-arch=dav-2201", "-O2"};
+            ret = aclrtcCompileProg(rtcProg, 2, compileOpts);
+            TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcCompileProg failed: ", ret);
 
-    size_t binSize = 0;
-    ret = aclrtcGetBinDataSize(rtcProg, &binSize);
-    TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcGetBinDataSize failed: ", ret);
+            size_t binSize = 0;
+            ret = aclrtcGetBinDataSize(rtcProg, &binSize);
+            TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcGetBinDataSize failed: ", ret);
 
-    std::vector<char> binData(binSize);
-    ret = aclrtcGetBinData(rtcProg, binData.data());
-    TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcGetBinData failed: ", ret);
+            binData.resize(binSize);
+            ret = aclrtcGetBinData(rtcProg, binData.data());
+            TORCH_CHECK(ret == ACL_SUCCESS, "aclrtcGetBinData failed: ", ret);
 
-    // --- Read RTC compile log (PDF §2.3.1.5: 编译日志调试) ---
-    size_t logSize = 0;
-    if (aclrtcGetCompileLogSize(rtcProg, &logSize) == ACL_SUCCESS && logSize > 0) {
-        std::vector<char> compileLog(logSize);
-        if (aclrtcGetCompileLog(rtcProg, compileLog.data()) == ACL_SUCCESS) {
-            std::string logStr(compileLog.data(), logSize);
-            if (!logStr.empty())
-                std::cerr << "[RTC Compile Log]: " << logStr << std::endl;
+            size_t logSize = 0;
+            if (aclrtcGetCompileLogSize(rtcProg, &logSize) == ACL_SUCCESS && logSize > 0) {
+                std::vector<char> compileLog(logSize);
+                if (aclrtcGetCompileLog(rtcProg, compileLog.data()) == ACL_SUCCESS) {
+                    std::string logStr(compileLog.data(), logSize);
+                    if (!logStr.empty())
+                        std::cerr << "[RTC Compile Log]: " << logStr << std::endl;
+                }
+            }
+            aclrtcDestroyProg(&rtcProg);
         }
     }
 
-    // --- Step 2: Load compiled binary (PDF §2.4.2) ---
-    // RTC 示例 (PDF §2.3.1.5 p86-87) 使用 ACL_RT_BINARY_LOAD_OPT_MAGIC
-    // 指定 kernel 类型。Vector-only kernel 用 VECTOR_CORE, 我们含
-    // Cube+Vector 的 kernel 需要 AI_CORE magic, 否则运行时默认为
-    // Vector Core → Cube 指令无法执行 → FixPipe 挂死 → 507014 timeout。
+    // Load binary to device (PDF §2.4.2)
+    // Magic value: AI CORE (Cube+Vector), not Vector-only default.
+    // Without explicit magic, runtime loads as Vector Core → Cube instructions
+    // hang → FixPipe timeout → 507014.
     aclrtBinHandle binHandle = nullptr;
     aclrtBinaryLoadOption loadOpt;
     loadOpt.type = ACL_RT_BINARY_LOAD_OPT_MAGIC;
@@ -265,7 +291,7 @@ static torch::Tensor FusedMoEFlagshipForward(
     loadOpts.options = &loadOpt;
     ret = aclrtBinaryLoadFromData(
         reinterpret_cast<const void*>(binData.data()),
-        binSize, &loadOpts, &binHandle);
+        binData.size(), &loadOpts, &binHandle);
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtBinaryLoadFromData failed: ", ret);
 
     // --- Step 3: Get function handle ---
@@ -317,7 +343,6 @@ static torch::Tensor FusedMoEFlagshipForward(
     TORCH_CHECK(ret == ACL_SUCCESS, "aclrtSynchronizeStream failed: ", ret);
 
     // --- Cleanup ---
-    aclrtcDestroyProg(&rtcProg);
     aclrtDestroyStream(stream);
     aclrtBinaryUnLoad(binHandle);
     aclrtFree(ws_gm);
