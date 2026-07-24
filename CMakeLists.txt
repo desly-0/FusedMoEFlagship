@@ -71,11 +71,14 @@ ascendc_fatbin_library(fused_moe_flagship_kernel
     ${KERNEL_SRC}
 )
 
-ascendc_compile_options(fused_moe_flagship_kernel PRIVATE
-    --npu-arch=dav-2201 -O2
+# PDF p471: target_compile_options + generator expression
+# $<COMPILE_LANGUAGE:ASC> 限制选项仅对 ASC 语言文件生效
+target_compile_options(fused_moe_flagship_kernel PRIVATE
+    $<$<COMPILE_LANGUAGE:ASC>:--npu-arch=dav-2201 -O2>
 )
 
-ascendc_include_directories(fused_moe_flagship_kernel PRIVATE
+# PDF p294: ascendc_include_directories 添加头文件搜索路径
+target_include_directories(fused_moe_flagship_kernel PRIVATE
     ${ASCEND_TOOLKIT_HOME}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/op_kernel
 )
